@@ -17,6 +17,7 @@ U0 InitMem(U64 sz)
   for (i = 0; i < 256; i++) g_pfx[i] = 0; g_pfx[0x66] = 1; g_pfx[0x67] = 1; g_pfx[0xF0] = 1; g_pfx[0xF2] = 1; g_pfx[0xF3] = 1; g_pfx[0x2E] = 1; g_pfx[0x36] = 1; g_pfx[0x3E] = 1; g_pfx[0x26] = 1; g_pfx[0x64] = 1; g_pfx[0x65] = 1; g_desk = MAlloc(307200); g_hpet_rate = 33;
   ata_buf = MAlloc(131072);                                  // 256 sectors * 512 B: ATA PIO read staging
 }
+#include "sym.HC" //HEMU finds what it needs in the guest by name.
 
 // PER-CORE state (reg/rip/rfl/halted/irq_stall/fpu/seg/decode) lives in CCpuState g_cpu_st[] - defined in
 // core.HC (included above), accessed through #define reg CST.f_reg etc. (CST = this instance's MyCore()
@@ -48,7 +49,7 @@ U64 ata_words, ata_seccnt, ata_pos, ata_r3, ata_r4, ata_r5;   // ATA PIO read - 
 U64 ata_wr, ata_wlba, ata_wcnt;                              // ATA PIO write in progress (lba, count) -> __host_disk_wr
 U8 *ata_buf;
 // g_seg[8] moved into CCpuState (per-core)
-U64 g_hpet_rate, g_jiffies0;         // wall-clock pacing: HPET ticks/instr, and the snapshot's base jiffies
+U64 g_hpet_rate; //Wall-clock pacing: HPET ticks an instruction.
 U64 g_badop;
 // system state: control regs, descriptor tables, MSRs, TSC, code/stack segments
 U64 cr0, cr2, cr3, cr4, cr8, g_cs, g_ss; U64 idtr_base, idtr_limit, gdtr_base, gdtr_limit, tsc;
@@ -791,27 +792,40 @@ U0 Op0F()
     default: g_badop = 0x0F00 | op2; halted = 2; "BADOP0F op2=%X rip=%X\n", op2, rip; break; } }
 
 //---------------------------------------------------------------- one instruction
-// HLE the hot transparent window-compositor blit (its entry = g_hle_blit): run the flat 0xFF-skip
-// copy natively instead of interpreting ~5 instrs/byte, then simulate its callee-clean RET 0x10.
-// Blit(dst_dc@[rsp+8], src_dc@[rsp+16]) - copies src.width*src.height bytes src.body->dst.body.
 U0 HleBlit()
-{
-  U64 ret = RdMem(reg[4], 8), dst_dc = RdMem(reg[4] + 8, 8), src_dc = RdMem(reg[4] + 16, 8);
-  U64 sb = RdMem(src_dc + 0x180, 8), db = RdMem(dst_dc + 0x180, 8);
-  I64 w = RdMem(src_dc + 0x14, 4) & 0xFFFF, h = RdMem(src_dc + 0x18, 4) & 0xFFFF, n = w * h, i;
+{//DCBlotColor8(dc,img) natively: img's width_internal*height bytes onto dc,
+//leaving TRANSPARENT (0xFF) ones. Pops its return and 2 args as it does.
+  U64 ret=RdMem(reg[4],8),dst_dc=RdMem(reg[4]+8,8),src_dc=RdMem(reg[4]+16,8),
+	sb=RdMem(src_dc+of_dc.body,8),db=RdMem(dst_dc+of_dc.body,8);
+  I64 w=RdMem(src_dc+of_dc.width_internal,4)&0xFFFF,
+	h=RdMem(src_dc+of_dc.height,4)&0xFFFF,n=w*h,i;
   U8 v;
-  if (sb && db && sb < mem_size && db < mem_size && n > 0 && sb + n <= mem_size && db + n <= mem_size)
-    for (i = 0; i < n; i++) { v = mem[sb + i]; if (v != 0xFF) mem[db + i] = v; }
-  reg[0] = n; reg[4] += 24; rip = ret;     // RAX=n (clobbered by the real fn); pop ret + 2 args
+  if (sb && db && sb<mem_size && db<mem_size && n>0 && sb+n<=mem_size &&
+	  db+n<=mem_size)
+    for (i=0;i<n;i++) {
+      v=mem[sb+i];
+      if (v!=0xFF)
+	mem[db+i]=v;
+    }
+  reg[0]=n;
+  reg[4]+=24;
+  rip=ret;
 }
 
-// Snapshot the COMPLETE composited frame (desktop + the OS's own mouse cursor, which GrUpdateScrn has
-// just drawn) into g_desk, so Present() shows the native cursor and never a torn mid-render frame.
-U0 CaptureFrom(U64 bd)                               // grab a 640x480 8-bit frame at `bd` into g_desk
-{ I64 k; if (bd && bd + 307200 <= mem_size) { for (k = 0; k < 307200; k++) g_desk[k] = mem[bd + k]; g_desk_ready = 1; } }
-U0 CaptureDesk() { CaptureFrom(RdMem(g_dc2 + 0x180, 8)); }   // gr.dc2->body (g_dc2 is per-build; the old
-// hardcoded 0x119ad3d8 was the SINGLE-CORE dc2 - on SMP it reads NULL, so g_desk was never captured and
-// Present() showed the live mid-composite buffer (the flicker). Single-core: g_dc2==0x119ad3d8, unchanged.
+U0 CaptureFrom(U64 bd)
+{//The finished 640x480 frame at bd into g_desk.
+  I64 k;
+  if (bd && bd+307200<=mem_size) {
+    for (k=0;k<307200;k++)
+      g_desk[k]=mem[bd+k];
+    g_desk_ready=1;
+  }
+}
+
+U0 CaptureDesk()
+{//gr.dc2's body, once GrUpdateScrn has drawn it all, mouse included.
+  CaptureFrom(RdMem(RdMem(guest.gr_dc2,8)+of_dc.body,8));
+}
 
 // ---- HLE the hot z-buffered span-filler GrFillRow(dc,x1,x2,y,z1,z2) = 0x1152cc28 in the fixed Varoom
 // build (~34% of frame + the per-pixel Rand-dither 11.5% that lives INSIDE it). Native reimplementation
@@ -821,7 +835,7 @@ U0 CaptureDesk() { CaptureFrom(RdMem(g_dc2 + 0x180, 8)); }   // gr.dc2->body (g_
 // (caller frame popped), 0=fall through to the interpreter for the cases we deliberately don't replicate.
 // See memory hemu-raster-hle-spec for the full contract. DEFAULT OFF (g_raster_hle=0); harness/Init arms it.
 U64 g_raster_hle[4], g_raster_cand; I64 g_raster_n, g_raster_calls;  // ACTIVE copies (TempleOS compiles the Gr routine several times - arm them ALL) + the candidate under verify
-U64 g_poly3_hle; I64 g_poly3_calls, g_poly3_scanned, g_poly3_diag;  // HLE of GrFillPoly3 (the z-buffered filled-3D-poly the face-rasterizer uses): do the whole fan + edge-walk + span NATIVELY instead of the JIT'd GrFillTri0. armed by snapshot.HC (prologue scan, once per game).
+U64 g_poly3_hle; I64 g_poly3_calls, g_poly3_diag;  // HLE of GrFillPoly3 (the z-buffered filled-3D-poly the face-rasterizer uses): do the whole fan + edge-walk + span NATIVELY instead of the JIT'd GrFillTri0. Armed by HooksArm at the guest's GrFillPoly3.
 // shadow-verify (g_raster_verify=1): run native into a span, capture the z-buffer + collision counters,
 // RESTORE the real buffers, fall through to the emulator, then compare at the return hook. z-buffer +
 // collision are dither-independent, so an exact match proves geometry + gameplay are bit-correct (dither
@@ -830,13 +844,22 @@ U64 g_raster_verify, g_raster_ret, g_rv_zbuf, g_rv_dc, g_rv_c1, g_rv_c2, g_rv_ic
 U64 g_dbg_bad[13]; I64 g_dbg_badn;       // forensics: first failing verify (zbad,bod,cnt,idx,flags,colw,c1 e/n,c2 e/n,z e/n,zj)
 U64 g_ctr_rip; I64 g_ctr_n;              // diag: count executions of one rip (arm: poke g_ctr_rip + its g_hooktbl bit)
 I64 g_rv_idx, g_rv_cnt, g_rv_step = 1, g_raster_diffs, g_raster_checks, g_rv_bodydiff; U8  g_rv_savb[1024]; U32 g_rv_savz[1024], g_rv_natz[1024], g_rv_natb[1024];
-U16 RasterRand(U64 fsb)                              // replicate RandU16 (0xc678) for the dither
-{
-  U64 seed = *(U64 *)(mem + fsb + 0x430);
-  I64 state = seed * 0x5851f42d4c957f2d; seed = ((I64)(seed & 0xffffffff0000) >> 16) ^ state; seed += 0x14057b7ef767814f;
-  if (!((*(U32 *)(mem + fsb + 0x18) >> 0xe) & 1)) { tsc += 100; seed ^= tsc; }
-  *(U64 *)(mem + fsb + 0x430) = seed;
-  return seed & 0xFFFF; }
+//See $LK,"::/Doc/Credits.DD"$.
+#define LIN_CONGRUE_A	6364136223846793005
+#define LIN_CONGRUE_C	1442695040888963407
+
+U16 RasterRand(U64 fsb)
+{//RandU16 for the dither, on the task at fsb (Kernel/KMathB.HC).
+  U64 seed=*(U64 *)(mem+fsb+of_task.rand_seed);
+  seed=LIN_CONGRUE_A*seed^(seed&0xFFFFFFFF0000)>>16;
+  seed+=LIN_CONGRUE_C;
+  if (!(*(U32 *)(mem+fsb+of_task.task_flags)>>TASKf_NONTIMER_RAND&1)) {
+    tsc+=100;
+    seed^=tsc;
+  }
+  *(U64 *)(mem+fsb+of_task.rand_seed)=seed;
+  return seed&0xFFFF;
+}
 I64 RasterDone(I64 cnt)                              // RAX=cnt, pop ret + 6 args (callee-pop), return to caller
 { reg[0] = cnt; rip = RdMem(reg[4], 8); reg[4] += 8 + 6 * 8; return 1; }
 
@@ -845,25 +868,25 @@ I64 RasterDone(I64 cnt)                              // RAX=cnt, pop ret + 6 arg
 // per-pixel z-test + probability dither + write). Used by the native poly rasterizer below.
 U0 PolySpan(U64 dc, I64 x1, I64 x2, I64 y, I64 z1, I64 z2)
 {
-  U64 body = *(U64 *)(mem + dc + 0x180), zbuf = *(U64 *)(mem + dc + 0x188), win = *(U64 *)(mem + dc + 0x170), fsb = msr_fsbase;
-  U32 flags = *(U32 *)(mem + dc + 0x1c), col_w = *(U32 *)(mem + dc + 0xa0);
-  I64 stride = *(I32 *)(mem + dc + 0x14), dimA = *(I32 *)(mem + dc + 0x10), dimC = *(I32 *)(mem + dc + 0x18);
+  U64 body = *(U64 *)(mem + dc + of_dc.body), zbuf = *(U64 *)(mem + dc + of_dc.depth_buf), win = *(U64 *)(mem + dc + of_dc.win_task), fsb = msr_fsbase;
+  U32 flags = *(U32 *)(mem + dc + of_dc.flags), col_w = *(U32 *)(mem + dc + of_dc.color);
+  I64 stride = *(I32 *)(mem + dc + of_dc.width_internal), dimA = *(I32 *)(mem + dc + of_dc.width), dimC = *(I32 *)(mem + dc + of_dc.height);
   I64 i, idx, zptr, zslope = 0, zacc, cur_z, clip_lo = 0, clip_hi = 0, count, mode, color, w1, w2, cw;
-  I64 dith_en = 0, dith_rand = 0, bg = *(U32 *)(mem + dc + 0xa4) & 0xFF;
+  I64 dith_en = 0, dith_rand = 0, bg = *(U32 *)(mem + dc + of_dc.bkcolor) & 0xFF;
   if (!body || !zbuf) return;
-  if ((flags >> 0xe) & 1) { x1 += *(I64 *)(mem + win + 0x100); x2 += *(I64 *)(mem + win + 0x100); y += *(I64 *)(mem + win + 0x108); z1 += *(I64 *)(mem + win + 0x110); z2 += *(I64 *)(mem + win + 0x110); }
+  if ((flags >> 0xe) & 1) { x1 += *(I64 *)(mem + win + of_task.scroll_x); x2 += *(I64 *)(mem + win + of_task.scroll_x); y += *(I64 *)(mem + win + of_task.scroll_y); z1 += *(I64 *)(mem + win + of_task.scroll_z); z2 += *(I64 *)(mem + win + of_task.scroll_z); }
   if ((flags >> 0x10) & 1) {
-    if (x1 < *(I64 *)(mem + dc + 0x140)) *(I64 *)(mem + dc + 0x140) = x1; if (x1 > *(I64 *)(mem + dc + 0x148)) *(I64 *)(mem + dc + 0x148) = x1;
-    if (x2 < *(I64 *)(mem + dc + 0x140)) *(I64 *)(mem + dc + 0x140) = x2; if (x2 > *(I64 *)(mem + dc + 0x148)) *(I64 *)(mem + dc + 0x148) = x2;
-    if (y  < *(I64 *)(mem + dc + 0x150)) *(I64 *)(mem + dc + 0x150) = y;  if (y  > *(I64 *)(mem + dc + 0x158)) *(I64 *)(mem + dc + 0x158) = y; }
+    if (x1 < *(I64 *)(mem + dc + of_dc.min_x)) *(I64 *)(mem + dc + of_dc.min_x) = x1; if (x1 > *(I64 *)(mem + dc + of_dc.max_x)) *(I64 *)(mem + dc + of_dc.max_x) = x1;
+    if (x2 < *(I64 *)(mem + dc + of_dc.min_x)) *(I64 *)(mem + dc + of_dc.min_x) = x2; if (x2 > *(I64 *)(mem + dc + of_dc.max_x)) *(I64 *)(mem + dc + of_dc.max_x) = x2;
+    if (y  < *(I64 *)(mem + dc + of_dc.min_y)) *(I64 *)(mem + dc + of_dc.min_y) = y;  if (y  > *(I64 *)(mem + dc + of_dc.max_y)) *(I64 *)(mem + dc + of_dc.max_y) = y; }
   if (y < 0) return;
   if (x2 < x1) { i = x1; x1 = x2; x2 = i; i = z1; z1 = z2; z2 = i; }
   if (x2 < 0) return;
   if (x1 < 0) { clip_lo = -x1; x1 = 0; }
   if ((flags >> 0xe) & 1) {
-    x1 += *(I64 *)(mem + win + 0xd0); x2 += *(I64 *)(mem + win + 0xd0); if (x1 > *(I64 *)(mem + win + 0xd8)) return;
-    if (x2 > *(I64 *)(mem + win + 0xd8)) { clip_hi = x2 - *(I64 *)(mem + win + 0xd8); x2 = *(I64 *)(mem + win + 0xd8); }
-    y += *(I64 *)(mem + win + 0xe8); if (y < 0) return; if (y > *(I64 *)(mem + win + 0xf0)) return; if (x2 < 0) return; }
+    x1 += *(I64 *)(mem + win + of_task.pix_left); x2 += *(I64 *)(mem + win + of_task.pix_left); if (x1 > *(I64 *)(mem + win + of_task.pix_right)) return;
+    if (x2 > *(I64 *)(mem + win + of_task.pix_right)) { clip_hi = x2 - *(I64 *)(mem + win + of_task.pix_right); x2 = *(I64 *)(mem + win + of_task.pix_right); }
+    y += *(I64 *)(mem + win + of_task.pix_top); if (y < 0) return; if (y > *(I64 *)(mem + win + of_task.pix_bottom)) return; if (x2 < 0) return; }
   if (x1 >= dimA) return; if (y >= dimC) return;
   if (x2 >= dimA) x2 = dimA - 1;
   count = x2 - x1; idx = y * stride + x1;
@@ -871,14 +894,14 @@ U0 PolySpan(U64 dc, I64 x1, I64 x2, I64 y, I64 z1, I64 z2)
   zptr = zbuf + idx * 4; if (count) zslope = ((z2 - z1) << 32) / count; zacc = z1 << 32; zacc += clip_lo * zslope;
   color = col_w & 0xFF; w1 = col_w & 0xFFFF; w2 = (col_w >> 16) & 0xFFFF; cw = w1;
   if ((col_w >> 24) & 0xC0) { dith_en = 1; w2 = (w2 & 0xFF) | (w1 & 0xFF00);
-    if ((col_w >> 24) & 0x80) { dith_rand = 1; if (RasterRand(fsb) < *(U64 *)(mem + dc + 0xb8)) cw = w2; }
+    if ((col_w >> 24) & 0x80) { dith_rand = 1; if (RasterRand(fsb) < *(U64 *)(mem + dc + of_dc.dither_probability_u16)) cw = w2; }
     else { if ((x1 ^ y) & 1) { i = w1; w1 = w2; w2 = i; } cw = w1; } }
   for (i = x1; i <= x2; i++) {
     cur_z = zacc >> 32;
     I64 draw = 1; if (cur_z < 0) draw = 0; else if (cur_z > *(I32 *)(mem + zptr)) draw = 0; else *(I32 *)(mem + zptr) = cur_z;
     if (draw) { color = cw & 0xFF; mode = (cw >> 8) & 0xFF;
-      if (mode == 1) mem[body + idx] ^= color; else if (mode == 2) { I64 v = mem[body + idx]; if (v != 0xFF && v != bg) (*(U64 *)(mem + dc + 0x130))++; } else mem[body + idx] = color; }
-    if (dith_en) { if (dith_rand) { if (RasterRand(fsb) < *(U64 *)(mem + dc + 0xb8)) cw = w2; else cw = w1; } else { I64 t = w1; w1 = w2; w2 = t; cw = w1; } }
+      if (mode == 1) mem[body + idx] ^= color; else if (mode == 2) { I64 v = mem[body + idx]; if (v != 0xFF && v != bg) (*(U64 *)(mem + dc + of_dc.collision_cnt))++; } else mem[body + idx] = color; }
+    if (dith_en) { if (dith_rand) { if (RasterRand(fsb) < *(U64 *)(mem + dc + of_dc.dither_probability_u16)) cw = w2; else cw = w1; } else { I64 t = w1; w1 = w2; w2 = t; cw = w1; } }
     idx += 1; zptr += 4; zacc += zslope; }
 }
 
@@ -907,7 +930,7 @@ I64 GrPoly3HLE()        // fires at GrFillPoly3's prologue: fan-triangulate the 
 {
   U64 dc, poly, body, zbuf, rmat; I64 n, i, S = 12, ax, ay, az, bx, by, bz, cx, cy, cz;   // CD3I32 = {I32 x,y,z} = 12 bytes
   dc = RdMem(reg[4] + 8, 8); n = RdMem(reg[4] + 0x10, 8); poly = RdMem(reg[4] + 0x18, 8);
-  body = *(U64 *)(mem + dc + 0x180); zbuf = *(U64 *)(mem + dc + 0x188);
+  body = *(U64 *)(mem + dc + of_dc.body); zbuf = *(U64 *)(mem + dc + of_dc.depth_buf);
   if (n < 3 || n > 64 || !body || !zbuf) return 0;                            // no z-buffer / odd n -> let the OS emulate
   if (poly + n * S >= mem_size) return 0;
   // We rasterize poly points as SCREEN coords. The real GrFillPoly3 first runs dc->transform on every
@@ -916,8 +939,8 @@ I64 GrPoly3HLE()        // fires at GrFillPoly3's prologue: fan-triangulate the 
   // transform (Castle Frankenstein's 3D walls set dc->transform=CFTransform + a rotation dc->r), fall
   // back to the OS's GrFillPoly3 so it transforms first. CDC offsets are stable across builds:
   // dc->x/y/z @0xD8/0xDC/0xE0 (I32), dc->r @0xC8 (-> 4x4 matrix; identity = 0x100000000 on the diagonal).
-  if (*(I32 *)(mem + dc + 0xd8) || *(I32 *)(mem + dc + 0xdc) || *(I32 *)(mem + dc + 0xe0)) return 0;
-  rmat = *(U64 *)(mem + dc + 0xc8); if (!rmat) return 0;
+  if (*(I32 *)(mem + dc + of_dc.x) || *(I32 *)(mem + dc + of_dc.y) || *(I32 *)(mem + dc + of_dc.z)) return 0;
+  rmat = *(U64 *)(mem + dc + of_dc.r); if (!rmat) return 0;
   for (i = 0; i < 16; i++) {
     if (i == 0 || i == 5 || i == 10 || i == 15) { if (*(I64 *)(mem + rmat + i * 8) != 0x100000000) return 0; }
     else if (*(I64 *)(mem + rmat + i * 8)) return 0;
@@ -949,23 +972,23 @@ I64 RasterHLE()
   if (vert) { y = RdMem(reg[4] + 0x10, 8); x1 = RdMem(reg[4] + 0x18, 8); x2 = RdMem(reg[4] + 0x20, 8); }
   else { x1 = RdMem(reg[4] + 0x10, 8); x2 = RdMem(reg[4] + 0x18, 8); y = RdMem(reg[4] + 0x20, 8); }
   I64 z1 = RdMem(reg[4] + 0x28, 8), z2 = RdMem(reg[4] + 0x30, 8);
-  U32 flags = *(U32 *)(mem + dc + 0x1c);
-  U64 zbuf = *(U64 *)(mem + dc + 0x188), win = *(U64 *)(mem + dc + 0x170);
-  U64 body = *(U64 *)(mem + dc + 0x180), fsb = msr_fsbase;
-  I64 stride = *(I32 *)(mem + dc + 0x14), width = *(I32 *)(mem + dc + 0x10), height = *(I32 *)(mem + dc + 0x18);
-  U32 col_w = *(U32 *)(mem + dc + 0xa0);             // packed: b0=color, b1=draw-mode, b2=color2, b3=dither flags
-  I64 bg = *(U32 *)(mem + dc + 0xa4) & 0xFF;
+  U32 flags = *(U32 *)(mem + dc + of_dc.flags);
+  U64 zbuf = *(U64 *)(mem + dc + of_dc.depth_buf), win = *(U64 *)(mem + dc + of_dc.win_task);
+  U64 body = *(U64 *)(mem + dc + of_dc.body), fsb = msr_fsbase;
+  I64 stride = *(I32 *)(mem + dc + of_dc.width_internal), width = *(I32 *)(mem + dc + of_dc.width), height = *(I32 *)(mem + dc + of_dc.height);
+  U32 col_w = *(U32 *)(mem + dc + of_dc.color); 	    // packed: b0=color, b1=draw-mode, b2=color2, b3=dither flags
+  I64 bg = *(U32 *)(mem + dc + of_dc.bkcolor) & 0xFF;
   I64 clip_lo = 0, clip_hi = 0, plotcnt = 0, i, idx, zptr, zslope = 0, zacc, cur_z; I64 dith_en = 0, dith_rand = 0, mode, color, w1, w2, cw;
   if (!zbuf) return 0;                                                            // no-z fast-fill path -> emulate
   I64 dimA = width, dimC = height, step = 1;        // moving-axis limit / fixed-axis limit / pixel stride
-  I64 sA = 0x100, sC = 0x108, eA = 0x140, eC = 0x150, pA = 0xd0, pAl = 0xd8, pC = 0xe8, pCl = 0xf0, nA = 0x120, nC = 0x124;
-  if (vert) { dimA = height; dimC = width; step = stride; sA = 0x108; sC = 0x100; eA = 0x150; eC = 0x140; pA = 0xe8; pAl = 0xf0; pC = 0xd0; pCl = 0xd8; nA = 0x124; nC = 0x120; }
+  I64 sA = of_task.scroll_x, sC = of_task.scroll_y, eA = of_dc.min_x, eAh = of_dc.max_x, eC = of_dc.min_y, eCh = of_dc.max_y, pA = of_task.pix_left, pAl = of_task.pix_right, pC = of_task.pix_top, pCl = of_task.pix_bottom, nA = of_dc.cur_x, nC = of_dc.cur_y;
+  if (vert) { dimA = height; dimC = width; step = stride; sA = of_task.scroll_y; sC = of_task.scroll_x; eA = of_dc.min_y; eAh = of_dc.max_y; eC = of_dc.min_x; eCh = of_dc.max_x; pA = of_task.pix_top; pAl = of_task.pix_bottom; pC = of_task.pix_left; pCl = of_task.pix_right; nA = of_dc.cur_y; nC = of_dc.cur_x; }
   // ---- DC offset (flag bit 0xe) ----
-  if ((flags >> 0xe) & 1) { x1 += *(I64 *)(mem + win + sA); x2 += *(I64 *)(mem + win + sA); y  += *(I64 *)(mem + win + sC); z1 += *(I64 *)(mem + win + 0x110); z2 += *(I64 *)(mem + win + 0x110); }
+  if ((flags >> 0xe) & 1) { x1 += *(I64 *)(mem + win + sA); x2 += *(I64 *)(mem + win + sA); y  += *(I64 *)(mem + win + sC); z1 += *(I64 *)(mem + win + of_task.scroll_z); z2 += *(I64 *)(mem + win + of_task.scroll_z); }
   // ---- bbox update (flag bit 0x10) ----
   if ((flags >> 0x10) & 1) {
-    if (x1 < *(I64 *)(mem + dc + eA)) *(I64 *)(mem + dc + eA) = x1; if (x1 > *(I64 *)(mem + dc + eA + 8)) *(I64 *)(mem + dc + eA + 8) = x1; if (x2 < *(I64 *)(mem + dc + eA)) *(I64 *)(mem + dc + eA) = x2; if (x2 > *(I64 *)(mem + dc + eA + 8)) *(I64 *)(mem + dc + eA + 8) = x2;
-    if (y  < *(I64 *)(mem + dc + eC)) *(I64 *)(mem + dc + eC) = y; if (y  > *(I64 *)(mem + dc + eC + 8)) *(I64 *)(mem + dc + eC + 8) = y; }
+    if (x1 < *(I64 *)(mem + dc + eA)) *(I64 *)(mem + dc + eA) = x1; if (x1 > *(I64 *)(mem + dc + eAh)) *(I64 *)(mem + dc + eAh) = x1; if (x2 < *(I64 *)(mem + dc + eA)) *(I64 *)(mem + dc + eA) = x2; if (x2 > *(I64 *)(mem + dc + eAh)) *(I64 *)(mem + dc + eAh) = x2;
+    if (y  < *(I64 *)(mem + dc + eC)) *(I64 *)(mem + dc + eC) = y; if (y  > *(I64 *)(mem + dc + eCh)) *(I64 *)(mem + dc + eCh) = y; }
   if (y < 0) return RasterDone(0);
   if (x2 < x1) { i = x1; x1 = x2; x2 = i; i = z1; z1 = z2; z2 = i; }
   if (x2 < 0) return RasterDone(0);
@@ -986,7 +1009,7 @@ I64 RasterHLE()
     if (cx >= x1 && cx <= x2) r13 = 0;
     else if (cx < x1) { dx = x1 - cx; r13 = dx * dx; }
     else { dx = cx - x2; r13 = dx * dx; }
-    I64 dy = y - cy; r13 += dy * dy; if (r13 < *(I64 *)(mem + dc + 0x138)) *(I64 *)(mem + dc + 0x138) = r13; }
+    I64 dy = y - cy; r13 += dy * dy; if (r13 < *(I64 *)(mem + dc + of_dc.nearest_dist)) *(I64 *)(mem + dc + of_dc.nearest_dist) = r13; }
   if ((flags >> 0xc) & 1) return RasterDone(0);
   // ---- dither setup from the packed color word (b3 bits 0x80=random / 0x40=ordered) ----
   // matches GrHLine exactly (source recovered from the in-RAM kernel text + the compiled jump table):
@@ -997,35 +1020,35 @@ I64 RasterHLE()
   w2 = (col_w >> 16) & 0xFFFF;                         // second dither color word
   cw = w1;                                             // active (color,rop) word
   if ((col_w >> 24) & 0xC0) { dith_en = 1; w2 = (w2 & 0xFF) | (w1 & 0xFF00);   // c1.rop = c0.rop
-    if ((col_w >> 24) & 0x80) { dith_rand = 1; if (RasterRand(fsb) < *(U64 *)(mem + dc + 0xb8)) cw = w2; }   // initial roll picks pixel 0's word
+    if ((col_w >> 24) & 0x80) { dith_rand = 1; if (RasterRand(fsb) < *(U64 *)(mem + dc + of_dc.dither_probability_u16)) cw = w2; }   // initial roll picks pixel 0's word
     else { if ((x1 ^ y) & 1) { i = w1; w1 = w2; w2 = i; } cw = w1; } }
   // ---- occlusion (char_clear): GrHLine recomputes IsPixCovered0 every 8 px and skips covered ones. covered =
   //   win->win_z_num(@+0x30c) < gr.win_z_buf[(y>>3)*80 + (x>>3)]. Only when screen-bitmap, not-on-top, not winmgr.
-  I64 need_cov = ((flags >> 0xe) & 1) && !((flags >> 0x11) & 1) && win && *(U64 *)(mem + win + 0x80) != *(U64 *)(mem + 0xc480);
+  I64 need_cov = ((flags >> 0xe) & 1) && !((flags >> 0x11) & 1) && win && *(U64 *)(mem + win + of_task.next_task) != *(U64 *)(mem + guest.sys_winmgr_task);
   U64 wzbuf = 0; I64 wzn = 0, cov_row = 0, covM = 1, cc = 1;   // cell = cov_row + (moving>>3)*covM: H walks columns, V walks rows (*80)
   if (vert) covM = 80;
-  if (need_cov) { wzbuf = *(U64 *)(mem + 0x119ee470); if (wzbuf && wzbuf < mem_size) { wzn = *(U16 *)(mem + win + 0x30c); if (vert) cov_row = y >> 3; else cov_row = (y >> 3) * 80; cc = wzn >= *(U16 *)(mem + wzbuf + (cov_row + (x1 >> 3) * covM) * 2); } else need_cov = 0; }
+  if (need_cov) { wzbuf = *(U64 *)(mem + guest.gr_win_z_buf); if (wzbuf && wzbuf < mem_size) { wzn = *(U16 *)(mem + win + of_task.win_z_num); if (vert) cov_row = y >> 3; else cov_row = (y >> 3) * 80; cc = wzn >= *(U16 *)(mem + wzbuf + (cov_row + (x1 >> 3) * covM) * 2); } else need_cov = 0; }
   // bounds guard: a wrong (false-signature-matched) candidate gives garbage args - never write out of RAM.
   if (idx < 0 || x2 < x1 || (x2 - x1 + 1) > 4096 || !body || body + idx + (x2 - x1 + 1) * step >= mem_size ||
       zbuf + (idx + (x2 - x1 + 1) * step) * 4 >= mem_size) return 0;
   // ---- shadow-verify: snapshot the span's body + z-buffer + collision BEFORE the native loop ----
   if (g_raster_verify && rip == g_raster_cand && g_raster_ret) return 0;   // a verify is already IN FLIGHT (IRQ task-switch re-entered): emulate the nested call, keep the outer shadow state intact
   I64 idx0 = idx, cnt0 = x2 - x1 + 1, vmode = g_raster_verify && rip == g_raster_cand && cnt0 > 0 && cnt0 <= 1024, vj;
-  if (vmode) { for (vj = 0; vj < cnt0; vj++) { g_rv_savb[vj] = mem[body + idx0 + vj * step]; g_rv_savz[vj] = *(U32 *)(mem + zbuf + (idx0 + vj * step) * 4); } g_rv_c1 = *(U64 *)(mem + dc + 0x130); g_rv_c2 = *(U64 *)(mem + dc + 0x138); }
+  if (vmode) { for (vj = 0; vj < cnt0; vj++) { g_rv_savb[vj] = mem[body + idx0 + vj * step]; g_rv_savz[vj] = *(U32 *)(mem + zbuf + (idx0 + vj * step) * 4); } g_rv_c1 = *(U64 *)(mem + dc + of_dc.collision_cnt); g_rv_c2 = *(U64 *)(mem + dc + of_dc.nearest_dist); }
   // ---- per-pixel span (r14 draw-enable is always 1 in the handled case) ----
   for (i = x1; i <= x2; i++) {
     if (cc) { cur_z = zacc >> 32;                      // signed 32-bit current z (z-test+draw gated by char_clear)
       I64 draw = 1; if (cur_z < 0) draw = 0; else if (cur_z > *(I32 *)(mem + zptr)) draw = 0; else *(I32 *)(mem + zptr) = cur_z;
       if (draw) { color = cw & 0xFF; mode = (cw >> 8) & 0xFF;   // rop dispatch per the REAL jump table: 1=XOR, 2=COLLISION(count, no write), all others=WRITE
-        if (mode == 1) mem[body + idx] ^= color; else if (mode == 2) { I64 v = mem[body + idx]; if (v != 0xFF && v != bg) (*(U64 *)(mem + dc + 0x130))++; } else mem[body + idx] = color; plotcnt++; } }
-    if (dith_en) { if (dith_rand) { if (RasterRand(fsb) < (*(U64 *)(mem + dc + 0xb8))) cw = w2; else cw = w1; } else { I64 t = w1; w1 = w2; w2 = t; cw = w1; } }
+	if (mode == 1) mem[body + idx] ^= color; else if (mode == 2) { I64 v = mem[body + idx]; if (v != 0xFF && v != bg) (*(U64 *)(mem + dc + of_dc.collision_cnt))++; } else mem[body + idx] = color; plotcnt++; } }
+    if (dith_en) { if (dith_rand) { if (RasterRand(fsb) < (*(U64 *)(mem + dc + of_dc.dither_probability_u16))) cw = w2; else cw = w1; } else { I64 t = w1; w1 = w2; w2 = t; cw = w1; } }
     if (need_cov && ((i + 1) & 7) == 0 && i + 1 <= x2) cc = wzn >= *(U16 *)(mem + wzbuf + (cov_row + ((i + 1) >> 3) * covM) * 2);   // recompute char_clear at the next 8-px boundary
     idx += step; zptr += step * 4; zacc += zslope; }
   if (vmode) {   // capture native z/body/coll, RESTORE the real buffers, fall through -> emulated runs, compare at the return hook
-    U64 nc1 = *(U64 *)(mem + dc + 0x130), nc2 = *(U64 *)(mem + dc + 0x138);
+    U64 nc1 = *(U64 *)(mem + dc + of_dc.collision_cnt), nc2 = *(U64 *)(mem + dc + of_dc.nearest_dist);
     for (vj = 0; vj < cnt0; vj++) { g_rv_natz[vj] = *(U32 *)(mem + zbuf + (idx0 + vj * step) * 4); g_rv_natb[vj] = mem[body + idx0 + vj * step];
       mem[body + idx0 + vj * step] = g_rv_savb[vj]; *(U32 *)(mem + zbuf + (idx0 + vj * step) * 4) = g_rv_savz[vj]; }
-    *(U64 *)(mem + dc + 0x130) = g_rv_c1; *(U64 *)(mem + dc + 0x138) = g_rv_c2; g_rv_c1 = nc1; g_rv_c2 = nc2; g_rv_idx = idx0; g_rv_cnt = cnt0; g_rv_step = step; g_rv_zbuf = zbuf; g_rv_dc = dc; g_rv_icount = icount; g_rv_irqc = irq_count; g_raster_ret = RdMem(reg[4], 8); g_hooktbl[g_raster_ret & 0xFFFF] = 1;
+    *(U64 *)(mem + dc + of_dc.collision_cnt) = g_rv_c1; *(U64 *)(mem + dc + of_dc.nearest_dist) = g_rv_c2; g_rv_c1 = nc1; g_rv_c2 = nc2; g_rv_idx = idx0; g_rv_cnt = cnt0; g_rv_step = step; g_rv_zbuf = zbuf; g_rv_dc = dc; g_rv_icount = icount; g_rv_irqc = irq_count; g_raster_ret = RdMem(reg[4], 8); g_hooktbl[g_raster_ret & 0xFFFF] = 1;
     g_jit_n[(g_raster_ret ^ (g_raster_ret >> 16)) & 0xFFFF] = -1; g_jit_hot[(g_raster_ret ^ (g_raster_ret >> 16)) & 0xFFFF] = 0;   // keep the RETURN-ADDRESS block interp'd while a verify is in flight - else the JIT runs the ret and RasterVerifyRet never fires (g_raster_ret stays stuck, every later call early-outs as "re-entered")
     return 0; }
   g_raster_calls++;
@@ -1048,15 +1071,15 @@ U0 RasterVerifyRet()   // at the rasterizer's return: compare emulated z-buffer 
   // (the old icount-gap heuristic let task-switches inside its 20000-instr allowance count as "diffs",
   // falsely rejecting good copies under the paced 60Hz loop -> n=1 -> the bimodal 19-vs-30fps Varoom runs).
   if (irq_count != g_rv_irqc || icount - g_rv_icount > g_rv_cnt * 64 + 20000) { RetHookClr(); return; }
-  U64 body = *(U64 *)(mem + g_rv_dc + 0x180); I64 zbad = 0, zj = -1;
+  U64 body = *(U64 *)(mem + g_rv_dc + of_dc.body); I64 zbad = 0, zj = -1;
   for (j = 0; j < g_rv_cnt; j++) { if (*(U32 *)(mem + g_rv_zbuf + (g_rv_idx + j * g_rv_step) * 4) != g_rv_natz[j]) { zbad++; if (zj < 0) zj = j; } if (mem[body + g_rv_idx + j * g_rv_step] != g_rv_natb[j]) bod++; }
   bad = zbad;
-  if (*(U64 *)(mem + g_rv_dc + 0x130) != g_rv_c1) bad++;                          // collision pixel counter
-  if (*(U64 *)(mem + g_rv_dc + 0x138) != g_rv_c2) bad++;                          // collision min-metric
+  if (*(U64 *)(mem + g_rv_dc + of_dc.collision_cnt) != g_rv_c1) bad++;				// collision pixel counter
+  if (*(U64 *)(mem + g_rv_dc + of_dc.nearest_dist) != g_rv_c2) bad++;			       // collision min-metric
   if (bad && !g_dbg_badn) { g_dbg_badn = 1;                                       // forensics: snapshot the FIRST bad verify
     g_dbg_bad[0] = zbad; g_dbg_bad[1] = bod; g_dbg_bad[2] = g_rv_cnt; g_dbg_bad[3] = g_rv_idx;
-    g_dbg_bad[4] = *(U32 *)(mem + g_rv_dc + 0x1c); g_dbg_bad[5] = *(U32 *)(mem + g_rv_dc + 0xa0);
-    g_dbg_bad[6] = *(U64 *)(mem + g_rv_dc + 0x130); g_dbg_bad[7] = g_rv_c1; g_dbg_bad[8] = *(U64 *)(mem + g_rv_dc + 0x138); g_dbg_bad[9] = g_rv_c2;
+    g_dbg_bad[4] = *(U32 *)(mem + g_rv_dc + of_dc.flags); g_dbg_bad[5] = *(U32 *)(mem + g_rv_dc + of_dc.color);
+    g_dbg_bad[6] = *(U64 *)(mem + g_rv_dc + of_dc.collision_cnt); g_dbg_bad[7] = g_rv_c1; g_dbg_bad[8] = *(U64 *)(mem + g_rv_dc + of_dc.nearest_dist); g_dbg_bad[9] = g_rv_c2;
     if (zj >= 0) { g_dbg_bad[10] = *(U32 *)(mem + g_rv_zbuf + (g_rv_idx + zj * g_rv_step) * 4); g_dbg_bad[11] = g_rv_natz[zj]; g_dbg_bad[12] = zj; } }
   g_raster_checks++;
   if (bad) g_raster_diffs++;                                                      // geometry/gameplay mismatch (should be 0)
@@ -1258,23 +1281,56 @@ U0 RunTo(U64 target, I64 budget)       // run until rip==target (used to HLE-cal
 U0 CallGuest(U64 fn)
 { U64 sentinel = 0x7FF0; reg[4] -= 8; WrMem(reg[4], 8, sentinel); rip = fn; halted = 0; RunTo(sentinel, 80000000); }
 
-// SMP: run THIS core (APs) for up to `budget` instructions, pure-interpreter, NO device ticks
-// (devices are core 0's job). Delivers a pending I_WAKE IPI as an interrupt (wakes a HLT'd AP);
-// stops early when the core goes idle (HLT) with nothing pending, yielding to the orchestrator.
-U0 RunCore(I64 budget)
-{
-  I64 lim = icount + budget, ip, b;
-  while (icount < lim) {
-    if (halted >= 2) break;                                       // fault
-    ip = __a_or64(&g_ipi_pending[MyCore()], 0);                   // ATOMIC (seq-cst) load: acquires the sender's task-state writes before we run its handler (x86-TSO)
-    if (ip && (rfl & F_IF)) { __a_and64(&g_ipi_pending[MyCore()], 0); halted = 0; DoInt(ip & 0xFF, 0, 0); }
-    if (halted == 1) break;                                       // idle (HLT), no deliverable IPI -> yield
-    b = 0;
-    if (!g_hooktbl[rip & 0xFFFF]) b = __ap_run(rip, lim - icount);   // per-core JIT block CHAIN (0 = cold)
-    if (!b) { Step(); b = 1; }                                    // cold -> interpret one (compile triggered host-side)
-    icount += b;
-  }
+U64 RamBase()
+{//Where guest RAM starts in this program's memory.
+  return mem;
 }
+
+Bool CoreAttach()
+{//Hands this core's state to the host's JIT. TRUE if the host has one.
+  Bool res=__jit_state(&reg[0],&rfl,&rip);
+  __jit_x87(&fpr[0],&fsp,&x87_sw);
+  __jit_seg(&msr_fsbase,&msr_gsbase,&tsc,&x87_cw,&xmm_lo[0],&xmm_hi[0]);
+  return res;
+}
+
+I64 g_core_faults[NCORES];	//Faults each core has stopped on.
+
+I64 RunCore(I64 budget)
+{//An application core's turn: up to budget instructions, with no device
+//ticks (those are core 0's). Takes a pending IPI at IF=1 and comes back
+//early when the core idles in HLT. Returns how many instructions ran, or
+//-halted when a fault stopped the core. The first fault is cleared, so
+//the core goes on serving jobs.
+  I64 start=icount,lim=icount+budget,ip,b,res;
+  while (icount<lim) {
+    if (halted>=2) {
+      res=-halted;
+      if (!g_core_faults[MyCore()]++)
+	halted=0;
+      return res;
+    }
+    //Atomic load: it acquires the sender's writes before the handler runs.
+    ip=__a_or64(&g_ipi_pending[MyCore()],0);
+    if (ip && rfl&F_IF) {
+      __a_and64(&g_ipi_pending[MyCore()],0);
+      halted=0;
+      DoInt(ip&0xFF,0,0);
+    }
+    if (halted==1)
+      break;
+    b=0;
+    if (!g_hooktbl[rip&0xFFFF])
+      b=__ap_run(rip,lim-icount);
+    if (!b) {
+      Step;
+      b=1;
+    }
+    icount+=b;
+  }
+  return icount-start;
+}
+
 U0 Run(I64 maxi)                       // run until icount==maxi (or a fault halts us)
 {
   while (icount < maxi) {

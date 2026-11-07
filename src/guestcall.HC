@@ -22,14 +22,15 @@
 // GC_* state/error codes are #defined in core.HC (cpu.HC's Run() tests GC_PENDING too).
 U64 g_gc_fn, g_gc_args[8], g_gc_sentinel, g_gc_res;
 I64 g_gc_argc, g_gc_state, g_gc_err, g_gc_budget, g_gc_steps, g_gc_calls, g_gc_savlock, g_gc_savbad;
-U64 g_gc_save[55], g_gc_savx[32];    // CCpuState image (440 bytes = 55 U64, see snapshot.HC) + XMM lo/hi
+CCpuState g_gc_save;	//The interrupted core's state, put back after the call.
+U64 g_gc_xmm_lo[16],g_gc_xmm_hi[16];
 
 U0 GuestCallRun()                    // precondition: state PENDING, (rfl & F_IF), halted <= 1, core 0
 {
-  U64 *p = &reg[0];                  // f_reg is the first CCpuState member, so this is the struct base
   I64 i;
-  for (i = 0; i < 55; i++) g_gc_save[i] = p[i];
-  for (i = 0; i < 16; i++) { g_gc_savx[i] = xmm_lo[i]; g_gc_savx[16 + i] = xmm_hi[i]; }
+  MemCpy(&g_gc_save,&g_cpu_st[MyCore()],sizeof(CCpuState));
+  MemCpy(g_gc_xmm_lo,xmm_lo,sizeof(g_gc_xmm_lo));
+  MemCpy(g_gc_xmm_hi,xmm_hi,sizeof(g_gc_xmm_hi));
   g_gc_savlock = lockf; g_gc_savbad = g_badop;
   g_gc_state = GC_RUNNING; g_gc_steps = 0;
   for (i = g_gc_argc - 1; i >= 0; i--) { reg[4] -= 8; WrMem(reg[4], 8, g_gc_args[i]); }   // HolyC: args pushed right to left, callee pops
@@ -39,8 +40,9 @@ U0 GuestCallRun()                    // precondition: state PENDING, (rfl & F_IF
   icount += g_gc_steps;
   if (rip == g_gc_sentinel) { g_gc_res = reg[0]; g_gc_err = 0; g_gc_state = GC_DONE; }
   else { g_gc_res = 0; if (halted) g_gc_err = GC_ERR_FAULT; else g_gc_err = GC_ERR_BUDGET; g_gc_state = GC_FAILED; }
-  for (i = 0; i < 55; i++) p[i] = g_gc_save[i];                                           // restore the interrupted context (incl. rip/rfl/rsp/halted)
-  for (i = 0; i < 16; i++) { xmm_lo[i] = g_gc_savx[i]; xmm_hi[i] = g_gc_savx[16 + i]; }
+  MemCpy(&g_cpu_st[MyCore()],&g_gc_save,sizeof(CCpuState));
+  MemCpy(xmm_lo,g_gc_xmm_lo,sizeof(g_gc_xmm_lo));
+  MemCpy(xmm_hi,g_gc_xmm_hi,sizeof(g_gc_xmm_hi));
   lockf = g_gc_savlock; g_badop = g_gc_savbad;
   g_gc_calls++;
 }
@@ -88,7 +90,7 @@ U64 GuestInfo(I64 which)             // read-only probes for the host (no global
     case 13: return g_gc_calls;
     case 14: return g_jit_on;
     case 15: return g_ncore;
-    case 16: return *(U64 *)(mem + 0xBD98);   // guest jiffies (the WinMgr wake cadence reference)
+    case 16: return GuestU64(guest.jiffies);
   }
   return 0;
 }

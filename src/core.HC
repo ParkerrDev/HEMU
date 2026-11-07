@@ -69,8 +69,3 @@ CCpuState g_cpu_st[NCORES];
 I64 g_ncore;                            // # of active cores (set by SetSnapRegs; 0/1 = single-core)
 U64 g_ipi_pending[NCORES];              // SMP: per-core pending IPI vector (0=none; runtime I_WAKE wakes APs)
 U64 g_icr_high[NCORES];                 // SMP: each core's last LAPIC ICR_HIGH write (dest apic_id<<24)
-U64 g_dc2 = 0x119ad3d8;                  // &gr.dc2 (CDC); set per-build in Main() init. Declared BEFORE
-                                         // cpu.HC so CaptureDesk() can capture from the RIGHT dc2 body on
-                                         // every build (the SMP dc2 is elsewhere - a hardcode there read
-                                         // NULL -> no tear-free capture -> Present fell back to the live
-                                         // mid-composite buffer = the SMP "everything flickers" bug).
