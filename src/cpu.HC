@@ -116,37 +116,7 @@ U0 DoShld(I64 isLeft, U64 src, I64 cnt, I64 sz)
   else        { res = ((dest >> cnt) | (src << (bits - cnt))) & m; last = (dest >> (cnt - 1)) & 1; }
   WrRM(sz, res); if (last) rfl |= F_CF; else rfl &= ~F_CF; SetZSP(res, sz); }
 
-//---------------------------------------------------------------- grp3 (F6/F7): TEST/NOT/NEG/MUL/IMUL/DIV/IDIV
-U0 Grp3(I64 sz)
-{
-  I64 d, bit, sa, sl, sdd; U64 a, r, imm, hi, lo, b, q, rem, bv, al, ah, bl, bh, ll, lh, hl, hh, mid; d = rg & 7;
-  if (d==2 || d==3) { RmUnary(d,sz); return; }
-  if (lockf) { AtomFault; return; }
-  a = RdRM(sz);
-  if (d <= 1) { imm = FetchImm(sz); SetLogic((a & imm) & SizeMask(sz), sz); return; }   // TEST
-  if (d == 4 || d == 5) {                                                               // MUL / IMUL
-    b = RdReg(0, sz);
-    if (sz == 8) {
-      al = a & 0xFFFFFFFF; ah = a >> 32; bl = b & 0xFFFFFFFF; bh = b >> 32; ll = al * bl; lh = al * bh; hl = ah * bl; hh = ah * bh; mid = (ll >> 32) + (lh & 0xFFFFFFFF) + (hl & 0xFFFFFFFF); lo = (ll & 0xFFFFFFFF) | (mid << 32); hi = hh + (lh >> 32) + (hl >> 32) + (mid >> 32);
-      if (d == 5) { if (a >> 63) hi -= b; if (b >> 63) hi -= a; }
-      reg[0] = lo; reg[2] = hi;
-    } else {
-      a &= SizeMask(sz); b &= SizeMask(sz); if (d == 5) r = SignExtTo64(a, sz) * SignExtTo64(b, sz); else        r = a * b; WrReg(0, sz, r & SizeMask(sz)); WrReg(2, sz, (r >> (sz * 8)) & SizeMask(sz)); }
-    return; }
-  // DIV / IDIV
-  if (a == 0) { halted = 3; return; }
-  if (sz == 8) {
-    hi = reg[2]; lo = reg[0];
-    if (d == 6 && hi == 0) { reg[0] = lo / a; reg[2] = lo % a; return; }
-    if (d == 7) { sl = lo; sa = a; reg[0] = sl / sa; reg[2] = sl % sa; return; }  // IDIV (64-bit-fits)
-    q = 0; rem = 0;
-    for (bit = 127; bit >= 0; bit--) { rem = rem << 1; if (bit >= 64) bv = (hi >> (bit - 64)) & 1; else bv = (lo >> bit) & 1; rem |= bv; if (rem >= a) { rem -= a; q |= 1(U64)<<bit; } }
-    reg[0] = q; reg[2] = rem;
-  } else {
-    hi = RdReg(2, sz); lo = RdReg(0, sz);
-    if (d == 6) { r = (hi << (sz * 8)) | lo; WrReg(0, sz, r / a); WrReg(2, sz, r % a); }
-    else { sdd = (SignExtTo64(hi, sz) << (sz * 8)) | (lo & SizeMask(sz)); sa = SignExtTo64(a, sz);
-           WrReg(0, sz, sdd / sa); WrReg(2, sz, sdd % sa); } } }
+#include "MulDiv"
 
 //---------------------------------------------------------------- string ops (+REP)
 U0 StrStep(I64 op, I64 sz)
@@ -247,7 +217,7 @@ U0 DoFxrstor(U64 a)
 
 U0 Op0F()
 {
-  U64 op2, a, b, r, lo, hi, se, al, ah, bl, bh, ll, lh, hl, mid, v; I64 sz, cc, d, isz; F64 fx, fy; op2 = Fetch8();
+  U64 op2, a, b, v; I64 sz, cc, d, isz; F64 fx, fy; op2 = Fetch8();
   if (lockf && !AtomOp2(op2)) { AtomFault; return; }
   if (rexW) sz = 8; else if (pfx66) sz = 2; else sz = 4;
   if (op2 >= 0x80 && op2 <= 0x8F) { cc = op2 - 0x80; d = SignExt32(Fetch32()); if (Cond(cc)) rip += d; return; }
@@ -263,13 +233,9 @@ U0 Op0F()
       if (!a) rfl |= F_ZF; else { rfl &= ~F_ZF; b = 0; while (!((a >> b) & 1)) b++; WrReg(rg, sz, b); } break;
     case 0xBD: DecodeModRM(); a = RdRM(sz);                                       // BSR r, r/m
       if (!a) rfl |= F_ZF; else { rfl &= ~F_ZF; b = sz * 8 - 1; while (!((a >> b) & 1)) b--; WrReg(rg, sz, b); } break;
-    case 0xAF:                                                                    // IMUL r, r/m
-      DecodeModRM(); a = RdReg(rg, sz); b = RdRM(sz);
-      if (sz == 8) {
-        al = a & 0xFFFFFFFF; ah = a >> 32; bl = b & 0xFFFFFFFF; bh = b >> 32; ll = al * bl; lh = al * bh; hl = ah * bl; mid = (ll >> 32) + (lh & 0xFFFFFFFF) + (hl & 0xFFFFFFFF); lo = (ll & 0xFFFFFFFF) | (mid << 32); hi = (ah * bh) + (lh >> 32) + (hl >> 32) + (mid >> 32);
-        if (a >> 63) hi -= b; if (b >> 63) hi -= a; r = lo; WrReg(rg, 8, r); rfl &= ~(F_CF | F_OF); se = 0; if (r >> 63) se = 0xFFFFFFFFFFFFFFFF; if (hi != se) rfl |= (F_CF | F_OF);
-      } else {
-        r = SignExtTo64(a, sz) * SignExtTo64(b, sz); WrReg(rg, sz, r & SizeMask(sz)); rfl &= ~(F_CF | F_OF); if (SignExtTo64(r & SizeMask(sz), sz) != r) rfl |= (F_CF | F_OF); }
+    case 0xAF:
+      DecodeModRM;
+      WrReg(rg,sz,MulRes(RdReg(rg,sz),RdRM(sz),sz,TRUE));
       break;
     // ---- SSE / SSE2: scalar double + data movement (the F64 TempleOS uses) ----
     case 0x10: DecodeModRM();                                              // MOVUPS/MOVUPD/MOVSS/MOVSD load
@@ -638,8 +604,8 @@ U0 Step()
     case 0x9C: reg[4] -= 8; WrMem(reg[4], 8, rfl); break;                          // PUSHFQ
     case 0x9D: rfl = (RdMem(reg[4], 8) & ~0x10000) | 2; reg[4] += 8; break;        // POPFQ (bit1 always 1)
     case 0x8F: DecodeModRM(); a = RdMem(reg[4], 8); reg[4] += 8; WrRM(8, a); break;  // POP r/m64
-    case 0x69: d = 4; if (pfx66) d = 2; DecodeModRM(d); a = RdRM(sz); imm = FetchImm(sz);       WrReg(rg, sz, (SignExtTo64(a, sz) * imm) & SizeMask(sz)); break;  // IMUL r,r/m,imm
-    case 0x6B: DecodeModRM(1); a = RdRM(sz); imm = SignExt8(Fetch8()); WrReg(rg, sz, (SignExtTo64(a, sz) * imm) & SizeMask(sz)); break;  // IMUL r,r/m,imm8
+    case 0x69: d = 4; if (pfx66) d = 2; DecodeModRM(d); a = RdRM(sz); imm = FetchImm(sz);       WrReg(rg,sz,MulRes(a,imm,sz,TRUE)); break;  // IMUL r,r/m,imm
+    case 0x6B: DecodeModRM(1); a = RdRM(sz); imm = SignExt8(Fetch8()); WrReg(rg,sz,MulRes(a,imm,sz,TRUE)); break;  // IMUL r,r/m,imm8
 
     case 0xB0: case 0xB1: case 0xB2: case 0xB3: case 0xB4: case 0xB5: case 0xB6: case 0xB7:  // MOV r8, imm8
       r2 = (op - 0xB0) | (rexB << 3); WrReg(r2, 1, Fetch8()); break;
