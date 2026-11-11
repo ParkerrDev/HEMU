@@ -87,21 +87,35 @@ U0 WrReg(I64 i, I64 sz, U64 v)
 // matters for RIP-relative operands: x86 measures RIP-relative from the END of the
 // WHOLE instruction (past the immediate), so callers with a trailing imm must pass
 // its size or the EA lands `immlen` bytes short (this silently corrupted neighbours).
-U0 DecodeModRM(I64 immlen = 0)
-{
-  U64 b, sib, addr = 0; I64 base_rm, ss, idxf, idx, bs;
-  b = mem[rip]; rip++;                  // inline Fetch8 (no inlining in the compiler; this is per-modrm hot)
-  md = (b >> 6) & 3; rg = ((b >> 3) & 7) | (rexR << 3); base_rm = b & 7;
-  if (md == 3) { isMem = 0; rm = base_rm | (rexB << 3); return; }
-  isMem = 1;
-  if (base_rm == 4) {
-    sib = Fetch8(); ss = (sib >> 6) & 3; idxf = (sib >> 3) & 7; idx = idxf | (rexX << 3); bs = (sib & 7) | (rexB << 3); if (!(idxf == 4 && !rexX)) addr += reg[idx] << ss; if ((sib & 7) == 5 && md == 0) addr += SignExt32(Fetch32()); else addr += reg[bs];
-  } else if (base_rm == 5 && md == 0) {
-    addr = SignExt32(Fetch32());     // RIP-relative: read disp FIRST (advances rip past it),
-    addr += rip + immlen;            // THEN add END-of-instruction rip (past any trailing immediate)
-  } else {
-    addr = reg[base_rm | (rexB << 3)]; }
-  if (md == 1) addr += SignExt8(Fetch8()); else if (md == 2) addr += SignExt32(Fetch32()); ea = addr + g_segbase; }
+Bool DecodeModRM(I64 immlen=0)
+{//Return whether a memory operand uses RSP as its base.
+  Bool rsp_base=FALSE;
+  U64 b,sib,addr=0;
+  I64 base_rm,ss,idxf,idx,bs;
+  b=mem[rip++];
+  md=b>>6&3;rg=b>>3&7|rexR<<3;base_rm=b&7;
+  if (md==3) {
+    isMem=0;rm=base_rm|rexB<<3;
+    return FALSE;
+  }
+  isMem=1;
+  if (base_rm==4) {
+    sib=Fetch8;ss=sib>>6&3;idxf=sib>>3&7;
+    idx=idxf|rexX<<3;bs=sib&7|rexB<<3;
+    if (!(idxf==4 && !rexX)) addr+=reg[idx]<<ss;
+    if (sib&7==5 && !md) addr+=SignExt32(Fetch32);
+    else {
+      addr+=reg[bs];rsp_base=bs==4;
+    }
+  } else if (base_rm==5 && !md) {
+    addr=SignExt32(Fetch32);
+    addr+=rip+immlen;
+  } else addr=reg[base_rm|rexB<<3];
+  if (md==1) addr+=SignExt8(Fetch8);
+  else if (md==2) addr+=SignExt32(Fetch32);
+  ea=addr+g_segbase;
+  return rsp_base;
+}
 U64 RdRM(I64 sz) { if (isMem) return RdMem(ea, sz); return RdReg(rm, sz); }
 U0  WrRM(I64 sz, U64 v) { if (isMem) WrMem(ea, sz, v); else WrReg(rm, sz, v); }
 
@@ -444,7 +458,16 @@ U0 Step()
       break;
     case 0x9C: reg[4] -= 8; WrMem(reg[4], 8, rfl); break;                          // PUSHFQ
     case 0x9D: rfl = (RdMem(reg[4], 8) & ~0x10000) | 2; reg[4] += 8; break;        // POPFQ (bit1 always 1)
-    case 0x8F: DecodeModRM(); a = RdMem(reg[4], 8); reg[4] += 8; WrRM(8, a); break;  // POP r/m64
+    case 0x8F:
+      d=8; if (sz==2) d=2;
+      b=DecodeModRM;
+      if (rg&7) {g_badop=0x8F;halted=2;}
+      else {
+	a=RdMem(reg[4],d);reg[4]+=d;
+	if (b) ea+=d;
+	WrRM(d,a);
+      }
+      break;
     case 0x69: d = 4; if (pfx66) d = 2; DecodeModRM(d); a = RdRM(sz); imm = FetchImm(sz);       WrReg(rg,sz,MulRes(a,imm,sz,TRUE)); break;  // IMUL r,r/m,imm
     case 0x6B: DecodeModRM(1); a = RdRM(sz); imm = SignExt8(Fetch8()); WrReg(rg,sz,MulRes(a,imm,sz,TRUE)); break;  // IMUL r,r/m,imm8
 
@@ -480,19 +503,32 @@ U0 Step()
       d=rg&7;
       if (d<2) RmUnary(d,sz);
       else if (lockf) AtomFault;
-      else if (d==2) {reg[4]-=8;WrMem(reg[4],8,rip);rip=RdRM(8);}
+      else if (d==2) {a=RdRM(8);reg[4]-=8;WrMem(reg[4],8,rip);rip=a;}
       else if (d==4) rip=RdRM(8);
-      else if (d==6) {reg[4]-=8;WrMem(reg[4],8,RdRM(8));}
+      else if (d==6) {
+	d=8; if (sz==2) d=2;
+	a=RdRM(d);reg[4]-=d;WrMem(reg[4],d,a);
+      }
       else {g_badop=0xFF;halted=2;}
       break;
 
     case 0x50: case 0x51: case 0x52: case 0x53: case 0x54: case 0x55: case 0x56: case 0x57:
-      r2 = (op - 0x50) | (rexB << 3); reg[4] -= 8; WrMem(reg[4], 8, reg[r2]); break;
+      d=8; if (sz==2) d=2;
+      r2=(op-0x50)|rexB<<3;a=RdReg(r2,d);
+      reg[4]-=d;WrMem(reg[4],d,a);break;
     case 0x58: case 0x59: case 0x5A: case 0x5B: case 0x5C: case 0x5D: case 0x5E: case 0x5F:
-      r2 = (op - 0x58) | (rexB << 3); reg[r2] = RdMem(reg[4], 8); reg[4] += 8; break;
-    case 0x68: reg[4] -= 8; WrMem(reg[4], 8, SignExt32(Fetch32())); break;   // PUSH imm32
-    case 0x6A: reg[4] -= 8; WrMem(reg[4], 8, SignExt8(Fetch8()));   break;   // PUSH imm8
-    case 0xC9: reg[4] = reg[5]; reg[5] = RdMem(reg[4], 8); reg[4] += 8; break; // LEAVE
+      d=8; if (sz==2) d=2;
+      r2=(op-0x58)|rexB<<3;a=RdMem(reg[4],d);
+      reg[4]+=d;WrReg(r2,d,a);break;
+    case 0x68: case 0x6A:
+      d=8; if (sz==2) d=2;
+      if (op==0x6A) a=SignExt8(Fetch8);
+      else a=FetchImm(d);
+      reg[4]-=d;WrMem(reg[4],d,a);break;
+    case 0xC9:
+      d=8; if (sz==2) d=2;
+      reg[4]=reg[5];a=RdMem(reg[4],d);
+      reg[4]+=d;WrReg(5,d,a);break;
     case 0x99: if (rexW) { if (reg[0] >> 63) reg[2] = 0xFFFFFFFFFFFFFFFF; else reg[2] = 0; }  // CQO
                else { if (reg[0] & 0x80000000) WrReg(2, 4, 0xFFFFFFFF); else WrReg(2, 4, 0); } break; // CDQ
 
