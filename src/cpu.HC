@@ -174,14 +174,7 @@ U0 WrMsr(U64 i, U64 v)
 {
   if      (i == 0xC0000080) msr_efer = v; else if (i == 0xC0000100) msr_fsbase = v; else if (i == 0xC0000101) msr_gsbase = v; else if (i == 0xC0000102) msr_kgsbase = v; else if (i == 0xC0000081) msr_star = v; else if (i == 0xC0000082) msr_lstar = v; else if (i == 0xC0000084) msr_sfmask = v;
   else if (i == 0x1B) msr_apic = v; }
-U0 Cpuid()  // enough feature bits for TempleOS: FPU/TSC/MSR/PAE/APIC/MMX/FXSR/SSE/SSE2, long mode
-{
-  U64 a = reg[0] & 0xFFFFFFFF;
-  if (a == 0)                 { reg[0] = 0x0000000D; reg[3] = 0x756E6547; reg[2] = 0x6C65746E; reg[1] = 0x49656E69; }
-  else if (a == 1)            { reg[0] = 0x000006FB; reg[1] = 0; reg[2] = 0x00000201; reg[3] = 0x178BFBFF; }
-  else if (a == 0x80000000)   { reg[0] = 0x80000008; reg[1] = 0; reg[2] = 0; reg[3] = 0; }
-  else if (a == 0x80000001)   { reg[0] = 0; reg[1] = 0; reg[2] = 0x00000001; reg[3] = 0x28100800; }
-  else                        { reg[0] = 0; reg[1] = 0; reg[2] = 0; reg[3] = 0; } }
+#include "CpuId"
 // String I/O (INS/OUTS, +REP). The ATA PIO data port (0x1F0) flows through these for REP INSW disk
 // reads - IoIn returns blank-disk zeros, so the read completes instead of deadlocking the poller.
 U0 DoIns(I64 sz)                                          // INS: [RDI] <- port DX
@@ -298,7 +291,7 @@ U0 Op0F()
     case 0x31: TscRead; reg[0]=tsc & 0xFFFFFFFF; reg[2]=(tsc>>32)&0xFFFFFFFF; break;                        // RDTSC
     case 0x30: WrMsr(reg[1]&0xFFFFFFFF, ((reg[2]&0xFFFFFFFF)<<32)|(reg[0]&0xFFFFFFFF)); break;                // WRMSR
     case 0x32: v=RdMsr(reg[1]&0xFFFFFFFF); reg[0]=v&0xFFFFFFFF; reg[2]=(v>>32)&0xFFFFFFFF; break;             // RDMSR
-    case 0xA2: Cpuid(); break;                                           // CPUID
+    case 0xA2: CpuId; break;
     case 0x01: DecodeModRM(); Grp7(); break;                            // LGDT/LIDT/SGDT/SIDT
     case 0x05: break;                                                    // SYSCALL (stub)
     case 0x09: break;                                                    // WBINVD

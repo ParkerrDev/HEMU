@@ -9,6 +9,12 @@ harnesses, and its `tools/snapshot/` are the recipes that produce the boot snaps
 
 This repository is HolyC source and the snapshots it boots. Nothing else.
 
+Startup resumes a captured, already booted 64-bit TempleOS desktop. It does not
+execute the DVD's 16-bit BIOS loader or perform a fresh installation from disk.
+The small `boot.HC` framebuffer kernel is an instruction/device fixture, not a
+TempleOS cold-boot test. The current desktop host uses a browser window; the
+native HolyC test adapter is headless, with no native desktop/JIT backend yet.
+
 ## Layout
 
 | Path | What |
@@ -18,6 +24,7 @@ This repository is HolyC source and the snapshots it boots. Nothing else.
 | `src/Mem.HC` | unaligned RAM reads/writes, the guest RAM alias, and saved-guest MMIO/IPI routing |
 | `src/Fpu.HC`, `src/Alu.HC`, `src/MulDiv.HC`, `src/Shift.HC`, `src/Atom.HC` | scalar floating-point, integer arithmetic, full multiply/divide, shifts and supported atomic operations |
 | `src/Except.HC` | bounded long-mode divide exception delivery to the current ring-zero code segment and stack |
+| `src/CpuId.HC` | the explicit virtual CPU identification and capability contract, independent of the host machine |
 | `src/Raster.HC`, `src/poly.HC`, `src/video.HC` | source-derived drawing acceleration, integer triangle edge walks and VGA conversion |
 | `src/host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |
 | `src/core.HC` | per-core CPU state (`CCpuState g_cpu_st[]` behind the `reg` / `rip` / `rfl` accessors) and the SMP and guest-call scaffolding every entry shares |
@@ -113,13 +120,33 @@ preserving simultaneous writes to neighboring fields. With exactly one guest
 core, valid cross-word RAM operands complete within one synchronous instruction,
 without IRQ delivery or a host callback between reading and writing. Original
 TempleOS provides 516 split-field witnesses, including cache-line crossings;
-387 also match a separate physical-host probe. Multi-core cross-word operands,
-MMIO and invalid LOCK forms retain a fault without writes. A complete SMP
-bus-lock path, CMPXCHG16B and architectural delivery of these unsupported-operand
+387 also match a separate physical-host probe. Multi-core cross-word operands
+require the host's opt-in shared-RAM ownership protocol; uncoordinated hosts,
+MMIO and invalid LOCK forms retain a fault without writes. CMPXCHG16B and
+architectural delivery of these unsupported-operand
 faults remain unimplemented. Four-worker
 contention tests and an independent x86-64 hardware oracle cover arithmetic,
 defined flags and register writeback; logical operations set undefined AF to
 zero consistently in both interpreter and JIT.
+
+`CpuId.HC` defines a conservative virtual CPU instead of copying the host's
+capabilities. Leaf 0 reports `GenuineIntel` and basic maximum 1. Leaf 1 retains
+model 0x6FB, puts a 64-byte line size and configured logical-processor count in
+EBX, and puts the current core's APIC ID in its high byte. Its named EDX bits
+identify the implemented FPU, TSC, MSR, CMPXCHG8B, APIC, CMOV and FXSAVE/FXRSTOR
+families; HTT marks multiple configured cores. ECX is zero. The extended maximum
+is 0x80000001, whose EDX reports long mode. Other leaves return zero, and these
+leaves do not vary with the input subleaf. There is no advertised CMPXCHG16B,
+MMX/SSE/SSE2/SSE3/SSSE3, XSAVE/AVX, SYSCALL, NX, RDTSCP or address-width leaf.
+Some unadvertised instructions still execute as documented subsets. Family bits
+do not remove the existing x87 precision, paging and exception-delivery limits.
+
+The CPUID gates check output register order, upper halves, untouched registers
+and flags, subleaf inputs, one/four-core restored topology, the stock CPUId
+wrapper and SysGlblsInit cache-line expression. They execute BootDVD's capability
+decision using 32-bit registers in the long-mode interpreter; they do not boot
+its BIOS loader. Independent physical and original-TempleOS probes establish
+the architectural register placement and the native consumer's layout.
 
 The x87 comparison contract follows Intel SDM revision 089: FCOMI/FUCOMI
 clear OF/SF/AF, preserve ZF/PF/CF and TOP on unmasked invalid operands, and
