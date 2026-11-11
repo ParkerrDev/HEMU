@@ -17,6 +17,7 @@ This repository is HolyC source and the snapshots it boots. Nothing else.
 | `src/Dev.HC`, `src/time.HC`, `src/keyboard.HC` | device state, port I/O, interrupt selection, elapsed clocks and PS/2 keyboard behavior |
 | `src/Mem.HC` | unaligned RAM reads/writes, the guest RAM alias, and saved-guest MMIO/IPI routing |
 | `src/Fpu.HC`, `src/Alu.HC`, `src/MulDiv.HC`, `src/Shift.HC`, `src/Atom.HC` | scalar floating-point, integer arithmetic, full multiply/divide, shifts and supported atomic operations |
+| `src/Except.HC` | bounded long-mode divide exception delivery to the current ring-zero code segment and stack |
 | `src/Raster.HC`, `src/poly.HC`, `src/video.HC` | source-derived drawing acceleration, integer triangle edge walks and VGA conversion |
 | `src/host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |
 | `src/core.HC` | per-core CPU state (`CCpuState g_cpu_st[]` behind the `reg` / `rip` / `rfl` accessors) and the SMP and guest-call scaffolding every entry shares |
@@ -45,8 +46,14 @@ desktop, disk or JIT implementation.
 Original QEMU/KVM also supplies 200 raster cases: native and accelerated line/
 triangle pixels, depth, collision counts, extents, nearest distance and final
 random seeds agree. These are bounded checks, not complete x86 or graphics
-coverage. Divide faults retain a stopped emulator state; guest #DE delivery
-is not implemented. Wide drawing contexts use original guest drawing code.
+coverage. Divide faults enter the guest's #DE handler for valid ring-zero,
+long-mode, IST-zero interrupt/trap gates targeting the current code segment.
+Original QEMU/KVM supplies 1,536 raw entry frames and native `DivZero` catch
+behavior; interpreter/JIT checks preserve the faulting prefix RIP, operands,
+stack alignment and saved flags. Unsupported gates, privilege/stack switches
+and addresses outside direct guest RAM retain a visible stopped state. General exception
+cascades, paging faults and double-fault delivery remain unsupported.
+Wide drawing contexts use original guest drawing code.
 
 The host drives one `Main` call per display frame. `Main` runs `HemuInit` the first time and `Frame` every
 time; `Frame` pulls input, runs the instruction budget the host asked for, and presents. A host that runs

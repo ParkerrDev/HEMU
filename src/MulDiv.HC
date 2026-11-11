@@ -62,8 +62,8 @@ Bool DivFull(U64 high,U64 low,U64 divisor,U64 *_quot,U64 *_rem)
   return TRUE;
 }
 
-U0 DivRes(U64 divisor,I64 size,Bool sign)
-{//Keep all destination registers intact on a retained divide fault.
+U0 DivRes(U64 divisor,I64 size,Bool sign,U64 fault_rip)
+{//A divide fault never writes the quotient or remainder.
   U64 high=0,low,quot,rem,limit=SizeMask(size);
   Bool neg_num=FALSE,neg_div=FALSE,neg_quot=FALSE;
   if (size==1)
@@ -91,7 +91,7 @@ U0 DivRes(U64 divisor,I64 size,Bool sign)
     if (!neg_quot) limit--;
   }
   if (!DivFull(high,low,divisor,&quot,&rem) || quot>limit) {
-    halted=3;
+    ExceptDiv(fault_rip);
     return;
   }
   if (neg_quot) quot=-quot;
@@ -103,7 +103,7 @@ U0 DivRes(U64 divisor,I64 size,Bool sign)
   }
 }
 
-U0 Grp3(I64 size)
+U0 Grp3(I64 size,U64 fault_rip)
 {//F6/F7 share TEST, unary arithmetic, full products and dividends.
   I64 op=rg&7;
   U64 arg,res,high,imm;
@@ -127,5 +127,5 @@ U0 Grp3(I64 size)
       WrReg(0,size,res);WrReg(2,size,high);
     }
   } else
-    DivRes(arg,size,op==7);
+    DivRes(arg,size,op==7,fault_rip);
 }

@@ -14,7 +14,7 @@
 class CCpuState
 {//The f_ prefix keeps register macros from expanding member names.
   U64 f_reg[16],f_rip,f_rfl; //rip,rfl,halted keep their ABI order.
-  I64 f_halted,f_irq_stall; //0 run,1 HLT,2 bad opcode,3 divide error.
+  I64 f_halted,f_irq_stall; //0 run,1 HLT,2 bad opcode,3 undeliverable divide.
   U64 f_g_seg[8];			//Flat long-mode selectors.
   U8  f_reserved[8]; //Keeps the existing CPU state layout.
   F64 f_fpr[8];

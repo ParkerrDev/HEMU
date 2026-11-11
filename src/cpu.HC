@@ -116,6 +116,7 @@ U0 DoShld(I64 isLeft, U64 src, I64 cnt, I64 sz)
   else        { res = ((dest >> cnt) | (src << (bits - cnt))) & m; last = (dest >> (cnt - 1)) & 1; }
   WrRM(sz, res); if (last) rfl |= F_CF; else rfl &= ~F_CF; SetZSP(res, sz); }
 
+#include "Except"
 #include "MulDiv"
 
 //---------------------------------------------------------------- string ops (+REP)
@@ -355,7 +356,7 @@ U0 CaptureDesk()
 
 U0 Step()
 {
-  U64 op, a, b, r; I64 sz, d, opn, r2, imm;
+  U64 op, a, b, r, fault_rip=rip; I64 sz, d, opn, r2, imm;
 
   if (g_hooktbl[rip & 0xFFFF]) {                   // gate: only ~1.5% of rips need the four hook compares
     if (RasterHLE) return;
@@ -466,8 +467,8 @@ U0 Step()
 
     // grp3: only TEST (reg field 0/1) has a trailing immediate, so RIP-relative EA must skip it.
     // Peek the ModRM reg field before decoding to pass the right immlen (else EA lands short).
-    case 0xF6: d=0; if (mem[rip]>>3&7<=1) d=1; DecodeModRM(d); Grp3(1);  break;
-    case 0xF7: d=0; if (mem[rip]>>3&7<=1) {d=4; if (sz==2) d=2;} DecodeModRM(d); Grp3(sz); break;
+    case 0xF6: d=0; if (mem[rip]>>3&7<=1) d=1; DecodeModRM(d); Grp3(1,fault_rip);  break;
+    case 0xF7: d=0; if (mem[rip]>>3&7<=1) {d=4; if (sz==2) d=2;} DecodeModRM(d); Grp3(sz,fault_rip); break;
 
     case 0xFE:
       DecodeModRM;
