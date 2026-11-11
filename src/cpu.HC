@@ -544,8 +544,12 @@ U0 Step()
 
 U0 RunTo(U64 target,I64 budget)
 {//Interpret until target, a fault, or budget instructions have run.
-  I64 lim=icount+budget;
+  I64 lim=icount+budget,poll=0;
   while (icount<lim && rip!=target && halted<2) {
+    if (!poll) {
+      if (g_ncore>1 && !__bus_poll) break;
+      poll=64;
+    }
     if (halted==1) {
       if (rfl&F_IF &&
             PicPending) {
@@ -555,6 +559,7 @@ U0 RunTo(U64 target,I64 budget)
     } else
       Step;
     icount++;
+    poll--;
     TimeRun(1);
     if (rfl&F_IF &&
           PicPending)
@@ -589,8 +594,12 @@ U64 CpuFault(I64 which=0)
 I64 RunCore(I64 budget)
 {//AP instruction budget without core zero's device ticks.
 //A fault remains stopped until the machine is restored or restarted.
-  I64 start=icount,lim=icount+budget,ip,b;
+  I64 start=icount,lim=icount+budget,ip,b,poll=0;
   while (icount<lim) {
+    if (poll<=0) {
+      if (g_ncore>1 && !__bus_poll) break;
+      poll=64;
+    }
     if (halted>=2)
       return -halted;
     //Atomic load: it acquires the sender's writes before the handler runs.
@@ -610,6 +619,7 @@ I64 RunCore(I64 budget)
       b=1;
     }
     icount+=b;
+    poll-=b;
   }
   return icount-start;
 }
@@ -619,6 +629,7 @@ U0 Run(I64 maxi)
   I64 b,batch,cap,slot;
   Bool pending;
   while (icount<maxi && halted<2) {
+    if (g_ncore>1 && !__bus_poll) break;
     pending=PicPending;
     if (pending && rfl&F_IF) {
       halted=0;

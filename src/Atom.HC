@@ -5,7 +5,7 @@ U0 AtomFault()
 }
 
 I64 AtomAddr(I64 size)
-{//SMP fields must fit one complete host atomic word.
+{//A split SMP field requires coordinated ownership of all guest RAM.
   U64 addr=ea;
   if (addr>=mem_size) addr&=0xFFFFFFFFFF;
   if (!isMem || addr>=mem_size || size>mem_size-addr) {
@@ -14,15 +14,24 @@ I64 AtomAddr(I64 size)
   }
   if (addr&(size-1) &&
 	(addr&7+size>8 || addr&~7+8>mem_size) && g_ncore!=1) {
-    AtomFault;
-    return -1;
+    if (!(1<g_ncore<=NCORES) || !__bus_lock) {
+      AtomFault;
+      return -1;
+    }
   }
   return addr;
 }
 
+U0 AtomEnd(U64 addr,I64 size)
+{//Release only after this instruction's register and flag writes retire.
+  if (g_ncore>1 && addr&(size-1) &&
+	(addr&7+size>8 || addr&~7+8>mem_size))
+    __bus_unlock;
+}
+
 U64 AtomPart(U64 addr,U64 arg,U64 expected,I64 size,I64 op)
-{//A lone CPU cannot be interrupted inside this RAM-only instruction.
-//SMP uses masked CAS, preserving changes to neighboring fields.
+{//Wide fields need a lone CPU or coordinated exclusive RAM ownership.
+//Contained fields use masked CAS to preserve neighboring changes.
   I64 shift=(addr&7)*8;
   U64 *ptr=mem+addr&~7,mask=SizeMask(size),field,word,old,res,found;
   Bool single=addr&7+size>8 || addr&~7+8>mem_size;
@@ -150,6 +159,7 @@ U0 RmArith(I64 op,U64 arg,I64 size)
     old=RdRM(size);
   res=Arith(op,old,arg,size);
   if (!lockf && op!=7) WrRM(size,res);
+  if (lockf) AtomEnd(addr,size);
 }
 
 U0 RmUnary(I64 op,I64 size)
@@ -190,6 +200,7 @@ U0 RmUnary(I64 op,I64 size)
       SetSub(0,old,res,size);
   }
   if (!lockf) WrRM(size,res);
+  if (lockf) AtomEnd(addr,size);
 }
 
 U0 RmXchg(I64 size)
@@ -205,6 +216,7 @@ U0 RmXchg(I64 size)
     WrRM(size,arg);
   }
   WrReg(rg,size,old);
+  if (isMem || lockf) AtomEnd(addr,size);
 }
 
 U0 RmXadd(I64 size)
@@ -222,6 +234,7 @@ U0 RmXadd(I64 size)
     WrRM(size,arg+old);
   }
   SetAdd(old,arg,old+arg,size);
+  if (lockf) AtomEnd(addr,size);
 }
 
 U0 RmCmpXchg(I64 size)
@@ -238,6 +251,7 @@ U0 RmCmpXchg(I64 size)
   }
   SetSub(expected,old,expected-old,size);
   if (expected!=old) WrReg(0,size,old);
+  if (lockf) AtomEnd(addr,size);
 }
 
 U0 RmCmpXchg8B()
@@ -260,6 +274,7 @@ U0 RmCmpXchg8B()
     reg[0]=old&0xFFFFFFFF;
     reg[2]=old>>32;
   }
+  if (lockf) AtomEnd(addr,8);
 }
 
 U0 DoBit(I64 op,U64 bit,I64 size)

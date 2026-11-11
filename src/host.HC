@@ -49,6 +49,11 @@ import I64 __jit_run(U64 at);                        // run the compiled block a
 import I64 __jit_dispatch(I64 budget);                // run a chain of compiled blocks up to budget: instructions executed
 import I64 __ap_run(U64 at, I64 budget);             // SMP application cores: their per-core chain (0 = not compiled)
 
+//Optional coordinated RAM ownership. An uncoordinated host refuses wide SMP.
+import Bool __bus_poll(); //TRUE to continue; FALSE unwinds at an instruction boundary.
+import Bool __bus_lock(); //All participants must have registered guarded,polled access.
+import U0 __bus_unlock(); //After the operand,registers and flags are complete.
+
 // ---- compiler intrinsics (not imports) --------------------------------------------------------
 //   I64 MyCore;                          this core's index; 0 on a single-core build. holyc-wasm: a per-instance
 //                                          WASM global the host sets per worker. TempleOS's compiler: Gs->num.
