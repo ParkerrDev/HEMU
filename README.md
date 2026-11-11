@@ -92,11 +92,13 @@ runs one core per host thread over shared memory and has separate worker/barrier
 regressions. Browser networking for TOOM multiplayer is not implemented.
 
 `src/Atom.HC` owns memory read/modify/write operations, including implicit-lock
-XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG and bit changes. Aligned
-RAM and the TempleOS RAM alias use sequentially consistent host atomics. Invalid
-LOCK forms and unsupported unaligned/MMIO atomic operands stop with a retained
-fault instead of silently writing non-atomically. A full x86 bus-lock path,
-CMPXCHG8B/16B and architectural fault delivery are not implemented. Four-worker
+XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG/8B and bit changes.
+RAM and the TempleOS RAM alias use sequentially consistent host atomics. An
+unaligned 16/32-bit field contained within one 64-bit word uses masked CAS,
+preserving simultaneous writes to neighboring fields. Invalid LOCK forms and
+unsupported cross-word/MMIO atomic operands stop with a retained fault instead
+of silently writing non-atomically. A full x86 bus-lock path, CMPXCHG16B and
+architectural fault delivery are not implemented. Four-worker
 contention tests and an independent x86-64 hardware oracle cover arithmetic,
 defined flags and register writeback; logical operations set undefined AF to
 zero consistently in both interpreter and JIT.

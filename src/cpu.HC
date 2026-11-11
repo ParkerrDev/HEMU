@@ -331,11 +331,14 @@ U0 Op0F()
     case 0xAB: DecodeModRM(); DoBit(1, RdReg(rg, sz), sz); break;                // BTS r/m, r
     case 0xB3: DecodeModRM(); DoBit(2, RdReg(rg, sz), sz); break;                // BTR r/m, r
     case 0xBB: DecodeModRM(); DoBit(3, RdReg(rg, sz), sz); break;                // BTC r/m, r
-    case 0xBA: DecodeModRM(1); d = (rg & 7) - 4; b = Fetch8(); DoBit(d, b, sz); break;  // grp8 BT/S/R/C r/m,imm8
+    case 0xBA:
+      DecodeModRM(1); d=(rg&7)-4; b=Fetch8&(sz*8-1);
+      DoBit(d,b,sz); break;
     case 0xB0: DecodeModRM; RmCmpXchg(1); break;
     case 0xB1: DecodeModRM; RmCmpXchg(sz); break;
     case 0xC0: DecodeModRM; RmXadd(1); break;
     case 0xC1: DecodeModRM; RmXadd(sz); break;
+    case 0xC7: DecodeModRM; RmCmpXchg8B; break;
     case 0xC3: DecodeModRM(); WrRM(sz, RdReg(rg, sz)); break;                    // MOVNTI r/m,r
     case 0xA4: DecodeModRM(); DoShld(1, RdReg(rg, sz), Fetch8(), sz); break;     // SHLD r/m,r,imm8
     case 0xA5: DecodeModRM(); DoShld(1, RdReg(rg, sz), RdReg(1, 1), sz); break;  // SHLD r/m,r,CL

@@ -5,15 +5,42 @@ U0 AtomFault()
 }
 
 I64 AtomAddr(I64 size)
-{//WASM atomics require aligned RAM; x86's bus lock is not emulated.
+{//An unaligned field must fit one complete atomic RAM word.
   U64 addr=ea;
   if (addr>=mem_size) addr&=0xFFFFFFFFFF;
-  if (!isMem || addr>=mem_size || size>mem_size-addr ||
-	addr&(size-1)) {
+  if (!isMem || addr>=mem_size || size>mem_size-addr) {
+    AtomFault;
+    return -1;
+  }
+  if (addr&(size-1) &&
+	(addr&7+size>8 || addr&~7+8>mem_size)) {
     AtomFault;
     return -1;
   }
   return addr;
+}
+
+U64 AtomPart(U64 addr,U64 arg,U64 expected,I64 size,I64 op)
+{//Masked CAS preserves simultaneous changes to neighboring fields.
+  I64 shift=(addr&7)*8;
+  U64 *ptr=mem+addr&~7,mask=SizeMask(size),field=mask<<shift,
+	word=__a_or64(ptr,0),old,res,found;
+  while (TRUE) {
+    old=word>>shift&mask;
+    switch (op) {
+      case 0:res=old|arg;break;
+      case 1:res=old&arg;break;
+      case 2:res=old^arg;break;
+      case 3:res=old+arg;break;
+      case 5:
+	if (old!=expected) return old;
+      default:res=arg;
+    }
+    res=word&~field|res<<shift&field;
+    found=__a_cmpxchg64(ptr,word,res);
+    if (found==word) return old;
+    word=found;
+  }
 }
 
 Bool AtomOp(I64 op)
@@ -31,7 +58,7 @@ Bool AtomOp2(I64 op)
 {
   switch (op) {
     case 0xAB:case 0xB0:case 0xB1:case 0xB3:case 0xBA:case 0xBB:
-    case 0xC0:case 0xC1:
+    case 0xC0:case 0xC1:case 0xC7:
       return TRUE;
   }
   return FALSE;
@@ -39,6 +66,7 @@ Bool AtomOp2(I64 op)
 
 U64 AtomOr(U64 addr,U64 val,I64 size)
 {
+  if (addr&(size-1)) return AtomPart(addr,val,0,size,0);
   if (size==1) return __a_or8(mem+addr,val);
   if (size==2) return __a_or16(mem+addr,val);
   if (size==4) return __a_or32(mem+addr,val);
@@ -47,6 +75,7 @@ U64 AtomOr(U64 addr,U64 val,I64 size)
 
 U64 AtomAnd(U64 addr,U64 val,I64 size)
 {
+  if (addr&(size-1)) return AtomPart(addr,val,0,size,1);
   if (size==1) return __a_and8(mem+addr,val);
   if (size==2) return __a_and16(mem+addr,val);
   if (size==4) return __a_and32(mem+addr,val);
@@ -55,6 +84,7 @@ U64 AtomAnd(U64 addr,U64 val,I64 size)
 
 U64 AtomXor(U64 addr,U64 val,I64 size)
 {
+  if (addr&(size-1)) return AtomPart(addr,val,0,size,2);
   if (size==1) return __a_xor8(mem+addr,val);
   if (size==2) return __a_xor16(mem+addr,val);
   if (size==4) return __a_xor32(mem+addr,val);
@@ -63,6 +93,7 @@ U64 AtomXor(U64 addr,U64 val,I64 size)
 
 U64 AtomAdd(U64 addr,U64 val,I64 size)
 {
+  if (addr&(size-1)) return AtomPart(addr,val,0,size,3);
   if (size==1) return __a_add8(mem+addr,val);
   if (size==2) return __a_add16(mem+addr,val);
   if (size==4) return __a_add32(mem+addr,val);
@@ -71,6 +102,7 @@ U64 AtomAdd(U64 addr,U64 val,I64 size)
 
 U64 AtomXchg(U64 addr,U64 val,I64 size)
 {
+  if (addr&(size-1)) return AtomPart(addr,val,0,size,4);
   if (size==1) return __a_xchg8(mem+addr,val);
   if (size==2) return __a_xchg16(mem+addr,val);
   if (size==4) return __a_xchg32(mem+addr,val);
@@ -79,6 +111,7 @@ U64 AtomXchg(U64 addr,U64 val,I64 size)
 
 U64 AtomCas(U64 addr,U64 expected,U64 val,I64 size)
 {
+  if (addr&(size-1)) return AtomPart(addr,val,expected,size,5);
   if (size==1) return __a_cmpxchg8(mem+addr,expected,val);
   if (size==2) return __a_cmpxchg16(mem+addr,expected,val);
   if (size==4) return __a_cmpxchg32(mem+addr,expected,val);
@@ -196,16 +229,39 @@ U0 RmCmpXchg(I64 size)
   if (expected!=old) WrReg(0,size,old);
 }
 
+U0 RmCmpXchg8B()
+{
+  I64 addr;
+  U64 old,expected=reg[2]<<32|reg[0]&0xFFFFFFFF,
+	arg=reg[1]<<32|reg[3]&0xFFFFFFFF;
+  if (!isMem || rg&7!=1 || rexW) {AtomFault;return;}
+  if (lockf) {
+    addr=AtomAddr(8);
+    if (addr<0) return;
+    old=AtomCas(addr,expected,arg,8);
+  } else {
+    old=RdRM(8);
+    if (old==expected) WrRM(8,arg);
+  }
+  rfl&=~F_ZF;
+  if (old==expected) rfl|=F_ZF;
+  else {
+    reg[0]=old&0xFFFFFFFF;
+    reg[2]=old>>32;
+  }
+}
+
 U0 DoBit(I64 op,U64 bit,I64 size)
 {//Memory bit strings may extend beyond the instruction's operand width.
-  I64 addr;
+  I64 addr,offset;
   U64 old,mask;
   if (op<0 || op>3 || lockf && (!op || !isMem)) {
     AtomFault;
     return;
   }
   if (isMem) {
-    ea+=bit>>3;
+    offset=SignExtTo64(bit,size);
+    ea+=offset>>3;
     bit&=7;
     size=1;
   } else
