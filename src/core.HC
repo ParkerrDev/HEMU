@@ -16,7 +16,7 @@ class CCpuState
   U64 f_reg[16],f_rip,f_rfl; //rip,rfl,halted keep their ABI order.
   I64 f_halted,f_irq_stall; //0 run,1 HLT,2 bad opcode,3 divide error.
   U64 f_g_seg[8];			//Flat long-mode selectors.
-  U8  f_fsc[8]; 			//Float reinterpret scratch.
+  U8  f_reserved[8]; //Keeps the existing CPU state layout.
   F64 f_fpr[8];
   I64 f_fsp;		  //x87 stack and top.
   U64 f_x87_cw,f_x87_sw,f_msr_fsbase,f_msr_gsbase;
@@ -33,7 +33,6 @@ CCpuState g_cpu_st[NCORES];
 #define halted	   g_cpu_st[MyCore()].f_halted
 #define irq_stall  g_cpu_st[MyCore()].f_irq_stall
 #define g_seg	   g_cpu_st[MyCore()].f_g_seg
-#define fsc	   g_cpu_st[MyCore()].f_fsc
 #define fpr	   g_cpu_st[MyCore()].f_fpr
 #define fsp	   g_cpu_st[MyCore()].f_fsp
 #define x87_cw	   g_cpu_st[MyCore()].f_x87_cw
