@@ -1,9 +1,3 @@
-//============================================================================
-// hemu - a clean-room, TempleOS-only x86-64 emulator, written in HolyC and
-// compiled to WebAssembly by holyc-wasm.  CPU core: fetch / decode (prefixes +
-// REX + ModRM + SIB) / execute / EFLAGS, plus a self-checking test battery.
-// None of QEMU is carried over.  Roadmap in README.
-//============================================================================
 #include "host.HC"                  // the host contract: every import hemu makes (see host.HC)
 #include "core.HC"                  // per-core CPU state + SMP/guest-call scaffolding shared by every entry
 
@@ -38,14 +32,12 @@ U8 g_hooktbl[65536];                 // rip&0xFFFF -> "maybe a special address" 
 U64 ata_words, ata_seccnt, ata_pos, ata_r3, ata_r4, ata_r5;   // ATA PIO read - serve C: sectors (disk == live.bin)
 U64 ata_wr, ata_wlba, ata_wcnt;                              // ATA PIO write in progress (lba, count) -> __host_disk_wr
 U8 *ata_buf;
-// g_seg[8] moved into CCpuState (per-core)
 U64 g_badop;
 // system state: control regs, descriptor tables, MSRs, TSC, code/stack segments
 U64 cr0, cr2, cr3, cr4, cr8, g_cs, g_ss; U64 idtr_base, idtr_limit, gdtr_base, gdtr_limit;
 U64 msr_efer, msr_star, msr_lstar, msr_sfmask, msr_kgsbase, msr_apic;   // msr_fsbase/msr_gsbase moved into CCpuState (per-core)
 U64 g_xmm_lo[NCORES][16], g_xmm_hi[NCORES][16];   // SSE XMM registers - PER-CORE (xmm_lo/xmm_hi #defines in core.HC): an AP suspended mid-XMM must not be clobbered by another core
 I64 g_lockf[NCORES];                  // PER-CORE: 1 = the current instruction had a 0xF0 LOCK prefix (lockf #define in core.HC) - makes the RMW atomic on shared memory
-// fsc/fpr/fsp/x87_cw/x87_sw moved into CCpuState (per-core)
 // devices: dual 8259 PICs + 8254 PIT (channel 0 -> IRQ0 = the scheduler tick)
 I64 pic1_base, pic1_mask, pic1_irr, pic1_isr, pic1_initstep; I64 pic2_base, pic2_mask, pic2_irr, pic2_isr, pic2_initstep;
 #include "time.HC"
@@ -67,12 +59,9 @@ U0 Ps2Resp(I64 b, I64 isms) { ps2q[ps2qt & 15] = b; ps2q_ms[ps2qt & 15] = isms; 
 I64 pit2_reload, pit2_div, pit2_wlo, spk_on;
 U0 UpdateSpk()
 { if (spk_on && pit2_div) __snd(1193182.0 / pit2_div); else __snd(0.0); }
-U0 InjectMouse(I64 b0, I64 b1, I64 b2) { ms_byte0=b0; ms_byte1=b1; ms_byte2=b2; ms_has=3; ms_phase=0; pic2_irr |= 0x10; }  // IRQ12
 // MMIO: any guest access at/above mem_size goes here. LAPIC/HPET/IOAPIC live high
 // in the physical map and are NOT in the RAM snapshot, so we emulate the few
 // registers TempleOS reads and swallow the rest (instead of trapping out-of-bounds).
-U64 lapic_base;                      // discovered base of the LAPIC uncached alias (page-aligned)
-U64 hpet_base;                       // discovered base of the HPET alias
 
 #define F_CF 0x0001
 #define F_PF 0x0004
@@ -81,9 +70,6 @@ U64 hpet_base;                       // discovered base of the HPET alias
 #define F_IF 0x0200
 #define F_DF 0x0400
 #define F_OF 0x0800
-
-// prefix + decode scratch
-// prefix + decode scratch (hasRex/rex*/pfx66/repf/g_segbase/md/rg/rm/isMem/ea) moved into CCpuState (per-core)
 
 //---------------------------------------------------------------- MMIO (LAPIC / HPET)
 // TempleOS reaches the LAPIC and HPET through an "uncached alias" whose base we
@@ -875,7 +861,6 @@ U0 CaptureDesk()
 
 U64 g_raster_hle[2],g_poly3_hle,g_dc_transform;
 I64 g_raster_n,g_raster_calls,g_poly3_calls;
-U64 g_ctr_rip; I64 g_ctr_n;
 //See $LK,"::/Doc/Credits.DD"$.
 #define LIN_CONGRUE_A	6364136223846793005
 #define LIN_CONGRUE_C	1442695040888963407
@@ -1041,7 +1026,6 @@ U0 Step()
   U64 op, a, b, r, cf; I64 sz, d, opn, r2, imm;
 
   if (g_hooktbl[rip & 0xFFFF]) {                   // gate: only ~1.5% of rips need the four hook compares
-    if (rip == g_ctr_rip && g_ctr_rip) g_ctr_n++;  // diag execution counter (0 = off)
     if (RasterHLE) return;
     if (rip == g_hle_blit) { HleBlit(); return; }   // native fast-path for the dominant compositor blit
     if (rip==g_capture_text)
@@ -1233,9 +1217,6 @@ U0 RunTo(U64 target,I64 budget)
       CheckIrq;
   }
 }
-// Call a guest function (no args) and run until it returns to a sentinel address.
-U0 CallGuest(U64 fn)
-{ U64 sentinel = 0x7FF0; reg[4] -= 8; WrMem(reg[4], 8, sentinel); rip = fn; halted = 0; RunTo(sentinel, 80000000); }
 
 U64 RamBase()
 {//Where guest RAM starts in this program's memory.
