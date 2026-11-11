@@ -9,7 +9,7 @@ extern U0 KbdTick();
 
 I64 rtc_idx,ms_byte0,ms_byte1,ms_byte2,ms_has,ms_phase,
       ps2q[16],ps2q_ms[16],ps2qh,ps2qt,ms_next,cfg_next,
-      pit2_reload,pit2_div,pit2_wlo,spk_on;
+      pit2_reload,pit2_div,pit2_wlo,spk_on,spk_ctrl;
 U8 vga_dac[768];
 I64 vga_read_pos,vga_write_pos;
 
@@ -69,7 +69,7 @@ U0 DevRst()
   irq_count=rtc_idx=0;
   ms_byte0=ms_byte1=ms_byte2=ms_has=ms_phase=0;
   ps2qh=ps2qt=ms_next=cfg_next=0;
-  pit2_reload=pit2_div=spk_on=0;
+  pit2_reload=pit2_div=spk_on=spk_ctrl=0;
   pit2_wlo=TRUE;
   MemSet(vga_dac,0,sizeof(vga_dac));
   VgaPaletteInit;
@@ -124,6 +124,7 @@ U64 IoIn(U64 port)
   if (port==0x21) return pic1_mask;
   if (port==0xA1) return pic2_mask;
   if (port==0x40) return PitRead;
+  if (port==0x61) return spk_ctrl;
   if (port==0x71) return RtcRead(rtc_idx);
   if (port==0x60) {
     if (ps2qh!=ps2qt) {
@@ -308,7 +309,8 @@ U0 IoOut(U64 port,U64 v)
     return;
   }
   if (port==0x61) {
-    spk_on=v&3==3;
+    spk_ctrl=v&3;
+    spk_on=spk_ctrl==3;
     UpdateSpk;
     return;
   }
