@@ -1,5 +1,5 @@
-//The x87 stack uses F64 precision. Extended-real memory operands still use
-//the legacy low-64-bit approximation; this is not an 80-bit x87 model.
+//The x87 stack uses F64 precision.
+//80-bit memory operands are rejected; this is not an 80-bit x87 model.
 
 F64 BitsToF64(U64 bits)
 {
@@ -191,7 +191,12 @@ F64 FArith(I64 op,F64 arg1,F64 arg2)
   return arg2/arg1;
 }
 
-U0 FpuMem(I64 op,I64 sub)
+U64 FSwGet()
+{//The stack top is stored separately from the other status bits.
+  return x87_sw&~0x3800|fsp<<11;
+}
+
+Bool FpuMem(I64 op,I64 sub)
 {
   I64 i,value,digit;
   Bool neg;
@@ -211,6 +216,9 @@ U0 FpuMem(I64 op,I64 sub)
 	  break;
 	case 7: //FNSTCW.
 	  WrMem(ea,2,x87_cw);
+	  break;
+	default:
+	  return FALSE;
       }
       break;
     case 0xDB:
@@ -221,12 +229,8 @@ U0 FpuMem(I64 op,I64 sub)
 	case 1...3: //FISTTP/FIST/FISTP m32.
 	  FIntStore(4,sub==1,sub!=2);
 	  break;
-	case 5: //FLD m80 approximation.
-	  FPush(BitsToF64(RdMem(ea,8)));
-	  break;
-	case 7: //FSTP m80 approximation.
-	  WrMem(ea,8,F64ToBits(FStv(0)));
-	  FPopv;
+	default:
+	  return FALSE;
       }
       break;
     case 0xDD:
@@ -240,6 +244,12 @@ U0 FpuMem(I64 op,I64 sub)
 	case 2...3: //FST(P) m64.
 	  WrMem(ea,8,F64ToBits(FStv(0)));
 	  if (sub==3) FPopv;
+	  break;
+	case 7: //FNSTSW m16.
+	  WrMem(ea,2,FSwGet);
+	  break;
+	default:
+	  return FALSE;
       }
       break;
     case 0xDF:
@@ -292,11 +302,19 @@ U0 FpuMem(I64 op,I64 sub)
     case 0xDE:
       if (op==0xDA) arg=IntToF64(SignExtTo64(RdMem(ea,4),4));
       else arg=IntToF64(SignExtTo64(RdMem(ea,2),2));
-      FStset(0,FArith(sub,FStv(0),arg));
+      if (sub==2 || sub==3) {
+	FCmpSW(FStv(0),arg);
+	if (sub==3) FPopv;
+      } else
+	FStset(0,FArith(sub,FStv(0),arg));
+      break;
+    default:
+      return FALSE;
   }
+  return TRUE;
 }
 
-U0 FpuConst(I64 op)
+Bool FpuConst(I64 op)
 {
   switch (op) {
     case 0: FPush(1.0); break;
@@ -305,11 +323,13 @@ U0 FpuConst(I64 op)
     case 3: FPush(0x400921FB54442D18(F64)); break;
     case 4: FPush(0x3FD34413509F79FF(F64)); break;
     case 5: FPush(0x3FE62E42FEFA39EF(F64)); break;
-    case 6: FPush(0.0);
+    case 6: FPush(0.0); break;
+    default: return FALSE;
   }
+  return TRUE;
 }
 
-U0 FpuMath(I64 sub,I64 op)
+Bool FpuMath(I64 sub,I64 op)
 {
   I64 exp;
   F64 arg1,arg2,res,log2e=0x3FF71547652B82FE(F64);
@@ -347,6 +367,9 @@ U0 FpuMath(I64 sub,I64 op)
 	break;
       case 7: //FINCSTP.
 	fsp=(fsp+1)&7;
+	break;
+      default:
+	return FALSE;
     }
   } else {
     switch (op) {
@@ -377,17 +400,23 @@ U0 FpuMath(I64 sub,I64 op)
 	FStset(0,Cos(FStv(0)));
     }
   }
+  return TRUE;
 }
 
-U0 OpX87(U64 op)
+Bool FpuReg(I64 op,I64 sub,I64 sti)
 {
-  I64 sub,sti;
+  Bool cond;
   F64 value;
-  DecodeModRM;
-  sub=rg&7;sti=rm&7;
-  if (isMem) {
-    FpuMem(op,sub);
-    return;
+  if ((op==0xDA || op==0xDB) && sub<4) { //FCMOVcc.
+    switch (sub) {
+      case 0: cond=rfl&F_CF!=0; break;
+      case 1: cond=rfl&F_ZF!=0; break;
+      case 2: cond=rfl&(F_CF|F_ZF)!=0; break;
+      case 3: cond=rfl&F_PF!=0;
+    }
+    if (op==0xDB) cond=!cond;
+    if (cond) FStset(0,FStv(sti));
+    return TRUE;
   }
   switch (op) {
     case 0xD9:
@@ -399,19 +428,23 @@ U0 OpX87(U64 op)
 	  value=FStv(0);
 	  FStset(0,FStv(sti));FStset(sti,value);
 	  break;
+	case 2:
+	  return !sti; //FNOP is D9 D0 only.
 	case 4:
 	  if (!sti) FStset(0,-FStv(0));
 	  else if (sti==1)
 	    FStset(0,(FStv(0)(U64)&0x7FFFFFFFFFFFFFFF)(F64));
 	  else if (sti==4) {
 	    x87_sw&=~0x200;FCmpSW(FStv(0),0.0);
-	  }
+	  } else
+	    return FALSE;
 	  break;
 	case 5:
-	  FpuConst(sti);
-	  break;
+	  return FpuConst(sti);
 	case 6...7:
-	  FpuMath(sub,sti);
+	  return FpuMath(sub,sti);
+	default:
+	  return FALSE;
       }
       break;
     case 0xD8:
@@ -421,27 +454,34 @@ U0 OpX87(U64 op)
       } else
 	FStset(0,FArith(sub,FStv(0),FStv(sti)));
       break;
+    case 0xDA:
+      if (sub!=5 || sti!=1) return FALSE;
+      FCmpSW(FStv(0),FStv(1));FPopv;FPopv; //FUCOMPP.
+      break;
     case 0xDC:
-      if (sub==0 || sub==1 || sub>=4) {
-	if (sub>=4) sub^=1;
-	FStset(sti,FArith(sub,FStv(sti),FStv(0)));
-      }
+      if (sub==2 || sub==3) return FALSE;
+      if (sub>=4) sub^=1;
+      FStset(sti,FArith(sub,FStv(sti),FStv(0)));
       break;
     case 0xDD:
+      if (!sub) //FFREE: native compiler pairs it with FINCSTP.
+	return TRUE;
       if (sub==2 || sub==3) {
 	FStset(sti,FStv(0));
 	if (sub==3) FPopv;
       } else if (sub==4 || sub==5) {
 	FCmpSW(FStv(0),FStv(sti));
 	if (sub==5) FPopv;
-      }
+      } else
+	return FALSE;
       break;
     case 0xDE:
       if (sub==3) {
+	if (sti!=1) return FALSE;
 	FCmpSW(FStv(0),FStv(1));FPopv;FPopv;
       } else {
-	if (sub==2) sub=6;
-	else if (sub>=4) sub^=1;
+	if (sub==2) return FALSE;
+	if (sub>=4) sub^=1;
 	FStset(sti,FArith(sub,FStv(sti),FStv(0)));
 	FPopv;
       }
@@ -449,14 +489,31 @@ U0 OpX87(U64 op)
     case 0xDB:
       if (sub==4 && sti==3) { //FNINIT.
 	fsp=0;x87_cw=0x37F;x87_sw=0;
-      } else if (sub==5 || sub==6)
+      } else if (sub==4 && sti==2)
+	x87_sw&=~0x80FF; //FNCLEX.
+      else if (sub==5 || sub==6)
 	FCmpFL(FStv(0),FStv(sti),sub==5);
+      else
+	return FALSE;
       break;
     case 0xDF:
       if (sub==4 && !sti)
-	reg[0]=reg[0]&~0xFFFF|x87_sw&0xFFFF;
+	reg[0]=reg[0]&~0xFFFF|FSwGet&0xFFFF;
       else if (sub==5 || sub==6) {
 	if (FCmpFL(FStv(0),FStv(sti),sub==5)) FPopv;
-      }
+      } else
+	return FALSE;
+      break;
+    default:
+      return FALSE;
   }
+  return TRUE;
+}
+
+Bool OpX87(U64 op)
+{
+  DecodeModRM;
+  if (isMem)
+    return FpuMem(op,rg&7);
+  return FpuReg(op,rg&7,rm&7);
 }

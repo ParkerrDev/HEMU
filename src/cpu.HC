@@ -834,7 +834,13 @@ U0 Step()
     case 0x90: break;
     case 0xF4: halted = 1; break;
     case 0xD8: case 0xD9: case 0xDA: case 0xDB:                     // x87 FPU escapes
-    case 0xDC: case 0xDD: case 0xDE: case 0xDF: OpX87(op); break;
+    case 0xDC: case 0xDD: case 0xDE: case 0xDF:
+      b=mem[rip];
+      if (!OpX87(op)) {
+	g_badop=op<<8|b;halted=2;
+	"BADOPX87 op=%X rip=%X\n",g_badop,rip;
+      }
+      break;
     case 0xFC: rfl &= ~F_DF; break;                      // CLD
     case 0xFD: rfl |= F_DF; break;                       // STD
     case 0x0F: Op0F(); break;

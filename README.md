@@ -89,7 +89,9 @@ record IE/ES/B. Measurements from Intel i9-14900HX and QEMU/TCG differ in
 this edge case; the host's comparison tests preserve those measurements and
 identify the discrepancy explicitly. Registers currently use binary64, and
 80-bit precision, the complete tag model and pending #MF delivery remain
-unsupported. Transcendental results use host math and can differ from native
+unsupported. Unsupported sub-encodings stop with both opcode bytes instead
+of silently succeeding; 80-bit memory operands are explicitly rejected.
+Transcendental results use host math and can differ from native
 x87 near integer pixel/texture boundaries.
 
 These checks cover observed workloads and regressions, not complete x86 hardware conformance or complete
