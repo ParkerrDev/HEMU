@@ -39,7 +39,7 @@ calls is standard HolyC. `MyCore` is a host intrinsic; a native adapter uses
 TempleOS's `Gs->num`. Bare intrinsic reads require HolyC-wasm A27 (52f06fb) or later.
 The complete interpreter compiles under original V5.03 with an explicit test
 host and passes the same 31 instruction cases plus 707 sampled hardware multiply/divide
-assertions as WASM. The memory and device
+assertions and 861 split-field atomic assertions as WASM. The memory and device
 modules also have 324 and 519 independent native output comparisons. The test
 host supplies serialized atomics and headless callbacks; it is not a native
 desktop, disk or JIT implementation.
@@ -107,12 +107,16 @@ regressions. Browser networking for TOOM multiplayer is not implemented.
 
 `src/Atom.HC` owns memory read/modify/write operations, including implicit-lock
 XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG/8B and bit changes.
-RAM and the TempleOS RAM alias use sequentially consistent host atomics. An
-unaligned 16/32-bit field contained within one 64-bit word uses masked CAS,
-preserving simultaneous writes to neighboring fields. Invalid LOCK forms and
-unsupported cross-word/MMIO atomic operands stop with a retained fault instead
-of silently writing non-atomically. A full x86 bus-lock path, CMPXCHG16B and
-architectural fault delivery are not implemented. Four-worker
+Aligned RAM and the TempleOS RAM alias use sequentially consistent host atomics.
+An unaligned 16/32-bit field contained within one 64-bit word uses masked CAS,
+preserving simultaneous writes to neighboring fields. With exactly one guest
+core, valid cross-word RAM operands complete within one synchronous instruction,
+without IRQ delivery or a host callback between reading and writing. Original
+TempleOS provides 516 split-field witnesses, including cache-line crossings;
+387 also match a separate physical-host probe. Multi-core cross-word operands,
+MMIO and invalid LOCK forms retain a fault without writes. A complete SMP
+bus-lock path, CMPXCHG16B and architectural delivery of these unsupported-operand
+faults remain unimplemented. Four-worker
 contention tests and an independent x86-64 hardware oracle cover arithmetic,
 defined flags and register writeback; logical operations set undefined AF to
 zero consistently in both interpreter and JIT.

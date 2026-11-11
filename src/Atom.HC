@@ -5,7 +5,7 @@ U0 AtomFault()
 }
 
 I64 AtomAddr(I64 size)
-{//An unaligned field must fit one complete atomic RAM word.
+{//SMP fields must fit one complete host atomic word.
   U64 addr=ea;
   if (addr>=mem_size) addr&=0xFFFFFFFFFF;
   if (!isMem || addr>=mem_size || size>mem_size-addr) {
@@ -13,7 +13,7 @@ I64 AtomAddr(I64 size)
     return -1;
   }
   if (addr&(size-1) &&
-	(addr&7+size>8 || addr&~7+8>mem_size)) {
+	(addr&7+size>8 || addr&~7+8>mem_size) && g_ncore!=1) {
     AtomFault;
     return -1;
   }
@@ -21,10 +21,17 @@ I64 AtomAddr(I64 size)
 }
 
 U64 AtomPart(U64 addr,U64 arg,U64 expected,I64 size,I64 op)
-{//Masked CAS preserves simultaneous changes to neighboring fields.
+{//A lone CPU cannot be interrupted inside this RAM-only instruction.
+//SMP uses masked CAS, preserving changes to neighboring fields.
   I64 shift=(addr&7)*8;
-  U64 *ptr=mem+addr&~7,mask=SizeMask(size),field=mask<<shift,
-	word=__a_or64(ptr,0),old,res,found;
+  U64 *ptr=mem+addr&~7,mask=SizeMask(size),field,word,old,res,found;
+  Bool single=addr&7+size>8 || addr&~7+8>mem_size;
+  if (single) {
+    word=RdMem(addr,size);
+    shift=0;
+  } else
+    word=__a_or64(ptr,0);
+  field=mask<<shift;
   while (TRUE) {
     old=word>>shift&mask;
     switch (op) {
@@ -37,6 +44,10 @@ U64 AtomPart(U64 addr,U64 arg,U64 expected,I64 size,I64 op)
       default:res=arg;
     }
     res=word&~field|res<<shift&field;
+    if (single) {
+      WrMem(addr,size,res);
+      return old;
+    }
     found=__a_cmpxchg64(ptr,word,res);
     if (found==word) return old;
     word=found;
