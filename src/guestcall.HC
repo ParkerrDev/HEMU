@@ -37,13 +37,14 @@ U0 GuestCallRun()                    // precondition: state PENDING, (rfl & F_IF
   reg[4] -= 8; WrMem(reg[4], 8, g_gc_sentinel);                                            // return address = sentinel (HLT byte in scratch)
   rip = g_gc_fn; rfl &= ~F_IF; halted = 0;
   while (rip != g_gc_sentinel && g_gc_steps < g_gc_budget && halted == 0) { Step(); g_gc_steps++; }
-  icount += g_gc_steps;
   if (rip == g_gc_sentinel) { g_gc_res = reg[0]; g_gc_err = 0; g_gc_state = GC_DONE; }
   else { g_gc_res = 0; if (halted) g_gc_err = GC_ERR_FAULT; else g_gc_err = GC_ERR_BUDGET; g_gc_state = GC_FAILED; }
   MemCpy(&g_cpu_st[MyCore()],&g_gc_save,sizeof(CCpuState));
   MemCpy(xmm_lo,g_gc_xmm_lo,sizeof(g_gc_xmm_lo));
   MemCpy(xmm_hi,g_gc_xmm_hi,sizeof(g_gc_xmm_hi));
   lockf = g_gc_savlock; g_badop = g_gc_savbad;
+  icount+=g_gc_steps;
+  TimeRun(g_gc_steps);
   g_gc_calls++;
 }
 
@@ -83,7 +84,7 @@ U64 GuestInfo(I64 which)             // read-only probes for the host (no global
     case 6:  return rfl;
     case 7:  return halted;
     case 8:  return icount;
-    case 9:  return g_game_running;
+    case 9:  return 0; //Reserved: removed the popup-size game guess.
     case 10: return g_gc_sentinel;
     case 11: return g_gc_err;
     case 12: return g_gc_steps;

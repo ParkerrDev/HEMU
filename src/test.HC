@@ -95,7 +95,7 @@ U0 Main()
 
   Reset(); Load(prog_cr, 14, 0x1000);  Go(1000); Check("mov cr3/rd", reg[3], 0x12345);
   Reset(); Load(prog_msr, 22, 0x1000); Go(1000); Check("wr/rdmsr EFER", reg[0], 0x500);
-  Reset(); Load(prog_tsc, 11, 0x1000); Go(1000); Check("rdtsc delta", reg[0], 100);
+  Reset(); Load(prog_tsc, 11, 0x1000); Go(1000); Check("rdtsc reads do not advance time", reg[0], 0);
 
   // INT n -> IDT gate -> handler -> IRETQ round-trip
   Reset();
@@ -132,6 +132,7 @@ U0 Main()
   rip = 0x1000;
   IoOut(0x20,0x11); IoOut(0x21,0x20); IoOut(0x21,0x04); IoOut(0x21,0x01); IoOut(0x21,0xFE);  // PIC1: vec base 0x20, unmask IRQ0
   IoOut(0x43,0x34); IoOut(0x40,100); IoOut(0x40,0);                        // PIT ch0: reload 100
+  TimeFrame(2000000,2000);
   Go(2000);
   CheckGE("PIT->IRQ0->handler fires", RdMem(0x7000, 8), 5);
 

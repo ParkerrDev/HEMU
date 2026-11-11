@@ -21,6 +21,8 @@
 // ---- required ---------------------------------------------------------------------------------
 import U0  __snap_load(U8 *ram);                      // copy the booted-RAM snapshot (live.bin) into guest RAM at mem
 import U0  __present(U8 *fb, I64 w, I64 h);           // show w*h 8-bit palette-index pixels (the composited desktop)
+import Bool __capture_lock(); //Pause other cores before reading the display.
+import U0 __capture_unlock(); //Release them after the completed frame is copied.
 import U0  __host_palette(I64 index, I64 rgb24);      // VGA DAC write: palette entry index (0..15) -> 0xRRGGBB
 import U0  __host_disk(I64 lba, I64 count, U8 *buf);     // ATA read: stage count 512-byte sectors of C: into buf
 import U0  __host_disk_wr(I64 lba, I64 count, U8 *buf);  // ATA write: persist count sectors from buf (host overlay)
@@ -29,6 +31,7 @@ import I64 __host_msy();                              // absolute mouse y (0..47
 import I64 __host_msb();                              // mouse buttons: bit0 left, bit1 right
 import I64 __host_wheel();                            // cumulative mouse-wheel position (-> ms.pos.z)
 import I64 __host_key();                              // next set-1 scancode (bit 8+: arrival entropy), <0 when drained
+import I64 __host_ns();                               //nanoseconds since the last frame
 import I64 __host_dt();                               // real milliseconds since the last frame (wall-clock pacing)
 import I64 __host_budget();                           // guest instructions to run this frame
 import I64 __host_time(I64 cmos_reg);                 // host wall clock for the CMOS RTC register the guest selected

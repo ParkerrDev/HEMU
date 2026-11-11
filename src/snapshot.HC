@@ -21,87 +21,14 @@
 Bool g_names_ok;	//GuestNamesFind found all it looks for in this guest.
 
 U0 Present()
-{//The last finished frame, else gr.dc2 as it is now.
-  U64 dc,body;
-  I64 w,h;
-  if (g_desk_ready) {
+{//Only completed new frames. Startup never exposes a live draw buffer.
+  if (g_desk_ready && g_desk_seq!=g_present_seq) {
     __present(g_desk,640,480);
-    return;
+    g_present_seq=g_desk_seq;
   }
-  if (!g_names_ok)
-    return;
-  dc=GuestU64(guest.gr_dc2);
-  body=GuestU64(dc+of_dc.body);
-  w=GuestU32(dc+of_dc.width_internal)&0xFFFF;
-  h=GuestU32(dc+of_dc.height)&0xFFFF;
-  if (w<1 || w>4096) w=640;
-  if (h<1 || h>4096) h=480;
-  if (body && body<RAM_SIZE)
-    __present(mem+body,w,h);
 }
 
-U64 g_wake_jif; //Guest jiffies at the last forced wake.
-
-U0 WakeTasks(Bool wake)
-{//g_game_running: whether a task waits on a popup that covers the screen
-//(70 by 50 of the 80 by 60 text cells), as a game's does. If wake, readies
-//every task that does not wait on its popup. A task in PopUp's TaskExe
-//must stay asleep: woken early, PopUp kills the popup before its job ends.
-  U64 head=GuestU64(guest.seth_task),t=head,pu;
-  I64 n,w,h,game=0;
-  for (n=0;t && t<RAM_SIZE && n<24;n++) {
-    pu=GuestU64(t+of_task.popup_task);
-    if (pu) {
-      w=GuestU64(pu+of_task.win_right)-GuestU64(pu+of_task.win_left);
-      h=GuestU64(pu+of_task.win_bottom)-GuestU64(pu+of_task.win_top);
-      if (pu<RAM_SIZE && w>=70 && h>=50)
-	game=1;
-    } else if (wake) {
-      *(U64 *)(mem+t+of_task.task_flags)&=
-	    ~(1<<TASKf_SUSPENDED|1<<TASKf_AWAITING_MSG);
-      *(U64 *)(mem+t+of_task.wake_jiffy)=0;
-    }
-    t=GuestU64(t+of_task.next_task);
-    if (t==head)
-      break;
-  }
-  g_game_running=game;
-}
-
-U64 g_inited, g_budget, g_fcount;       // persist across per-frame __main calls (browser drives one frame/RAF)
-
-// Auto-arm the native span-filler HLE (cpu.HC RasterHLE) when a game is running: find the TempleOS Gr
-// z-buffered scanline routine by SIGNATURE (prologue 55 48 8b ec 48 83 ec 78 + the distinctive CDC.color
-// loads `mov ebx,[rsi+0xa0]`=8b 9e a0 00 00 00 @+0x26 and `[rsi+0xa4]`=8b 9e a4 @+0x2f). It's runtime-
-// compiled per launch so the address isn't fixed -> scan. Routing it to RasterHLE replaces ~45% of a 3D
-// game's frame with native code (verified bit-exact for z-buffer+collision). g_jit_n=0 invalidates any
-// compiled block (RUNDISP then breaks there) and g_hooktbl makes Step run the hook + the Run loop keep it
-// interp'd. Scan a bounded number of frames after launch, then stop (cheap once found / given up).
-U64 g_raster_tries, g_raster_scan_from = 0x11000000, g_raster_armframes;
-U64 g_raster_rej[8]; I64 g_rej_n;       // verify-rejected addresses (copies our HLE can't replicate) - skip on rescan
-U64 g_raster_cold[8]; I64 g_cold_n, g_cold_i;  // cold-timeout candidates: signature matched but never called during
-                                        // verify (e.g. armed in attract mode, used only in gameplay) - retried
-                                        // cheaply forever (no rescan needed; we know the address). Fixes the
-                                        // bimodal Varoom fps: copy #1 cold-dropped at launch -> n=1 -> 19fps runs.
-U0 ArmRaster()                          // find a candidate from g_raster_scan_from; arm it in VERIFY mode (self-validating)
-{
-  U64 a; I64 k, skip;
-  for (a = g_raster_scan_from; a < 0x11C00000; a++) {
-    if (mem[a] != 0x55) continue;
-    skip = 0;
-    for (k = 0; k < g_raster_n; k++) if (a == g_raster_hle[k]) skip = 1;     // already active
-    for (k = 0; k < g_rej_n; k++) if (a == g_raster_rej[k]) skip = 1;        // already rejected
-    if (skip) continue;
-    if (mem[a+1]!=0x48 || mem[a+2]!=0x8B || mem[a+3]!=0xEC || mem[a+4]!=0x48 || mem[a+5]!=0x83 || mem[a+6]!=0xEC || mem[a+7]!=0x78) continue;     // prologue
-    if (mem[a+0x26]!=0x8B || mem[a+0x27]!=0x9E || mem[a+0x28]!=0xA0 || mem[a+0x29] || mem[a+0x2A] || mem[a+0x2B]) continue;                        // mov ebx,[rsi+0xa0]
-    if (mem[a+0x2F]!=0x8B || mem[a+0x30]!=0x9E || mem[a+0x31]!=0xA4) continue;                                                                     // mov ebx,[rsi+0xa4]
-    if (mem[a+0x3C]!=0x48 || mem[a+0x3D]!=0x8B || mem[a+0x3E]!=0x86 || mem[a+0x3F]!=0x88 || mem[a+0x40]!=0x01) continue;                            // mov rax,[rsi+0x188] (z-buffer)
-    // candidate: arm in VERIFY mode - RasterVerifyRet disarms+rescans if native != emulated; the frame loop
-    // also disarms+rescans if the candidate is never exercised (a dead/cold signature match).
-    g_raster_scan_from = a + 1; g_raster_cand = a; g_hooktbl[a & 0xFFFF] = 1; g_jit_n[(a ^ (a >> 16)) & 0xFFFF] = 0; g_raster_verify = 1; g_raster_checks = 0; g_raster_diffs = 0; g_raster_armframes = 0;
-    return; }
-  g_raster_scan_from = 0x11C00000;      // exhausted: stop scanning (no span-filler in this game)
-}
+U64 g_inited,g_budget;
 
 // Input is pulled from the host each frame so the SAME snapshot.HC serves both runners: the Node
 // harness (snap-run.mjs) feeds a synthetic cursor sweep + keystrokes to prove animation headlessly,
@@ -128,88 +55,52 @@ U0 Frame()
     InjectKey(sc);
   }
   if (g_names_ok) mem[guest.ms_hard_installed]=1;
-  // Wake the scheduler at the OS's OWN refresh cadence (~31Hz), not every __main: force-waking the
-  // WinMgr per __main made refresh (and every per-refresh animation: title marquee, border wiggle,
-  // cursor) track the host loop rate - with the JIT that was 150-220/s, i.e. "everything ~5x speed".
-  // 32 guest-jiffies (= 32 real ms with correct pacing) restores TempleOS's designed ~30fps cadence.
-  // The popup/game scan still runs every frame so g_game_running stays fresh.
-  U64 jif=GuestU64(guest.jiffies);
-  if (!g_names_ok) {
-  } else if (jif-g_wake_jif>=32 || jif<g_wake_jif) {
-    WakeTasks(TRUE);
-    g_wake_jif=jif;
-  } else
-    WakeTasks(FALSE);
-  // auto-arm the span-filler HLE while a game is up: scan -> arm a candidate in VERIFY mode -> the per-call
-  // shadow compare (RasterVerifyRet) sets g_raster_diffs if native != emulated (wrong function) -> disarm +
-  // scan on; after enough clean checks promote to ACTIVE (native render). Self-validating, so a false
-  // signature match can never corrupt the game (it just falls back to emulation). Disarm on game exit.
-  if (g_game_running) {
-    if (!g_raster_cand) {
-      if (g_raster_scan_from < 0x11C00000) { if (g_raster_n < 4) ArmRaster(); }
-      else { g_raster_tries++;
-        if ((g_raster_tries & 31) == 0 && g_raster_tries < 600 && g_raster_n < 4) g_raster_scan_from = 0x11000000;  // exhausted (e.g. scanned before the game's code compiled): RESCAN every 32 frames for ~10s, then give up (non-3D game)
-        else if (g_cold_n && (g_raster_tries & 63) == 0 && g_raster_n < 4) {       // retry a cold-dropped candidate (no rescan: address known) - it may be warm now
-          I64 ci, cq, ok; U64 ca;
-          for (ci = 0; ci < g_cold_n; ci++) { ca = g_raster_cold[(g_cold_i + ci) % g_cold_n]; ok = 1;
-            for (cq = 0; cq < g_raster_n; cq++) if (ca == g_raster_hle[cq]) ok = 0;
-            if (ok) { g_cold_i = (g_cold_i + ci + 1) % g_cold_n; g_raster_cand = ca; g_hooktbl[ca & 0xFFFF] = 1; g_jit_n[(ca ^ (ca >> 16)) & 0xFFFF] = 0; g_raster_verify = 1; g_raster_checks = 0; g_raster_diffs = 0; g_raster_armframes = 0; ci = 99; } } } }
-    } else {
-      g_raster_armframes++;
-      if (g_raster_diffs >= 3 && g_raster_diffs * 10 >= g_raster_checks) { U64 rc = g_raster_cand; if (g_rej_n < 8) { g_raster_rej[g_rej_n] = rc; g_rej_n++; } g_raster_cand = 0; g_raster_verify = 0; g_jit_n[(rc ^ (rc >> 16)) & 0xFFFF] = -1; HookClrAt(rc); }  // >=10% diff RATE = wrong fn; remember + skip on rescan; un-gate the rip (it's real game code)
-      else if (g_raster_checks >= 100 && g_raster_diffs * 100 <= g_raster_checks) { g_raster_hle[g_raster_n] = g_raster_cand; g_raster_n++; g_jit_rip[(g_raster_cand ^ (g_raster_cand >> 16)) & 0xFFFF] = g_raster_cand; g_jit_n[(g_raster_cand ^ (g_raster_cand >> 16)) & 0xFFFF] = -2; g_raster_cand = 0; g_raster_verify = 0; }  // validated -> ACTIVE; mark slot -2 so RUNDISP calls RasterHLE INLINE (no per-scanline chain break)
-      else if (g_raster_armframes > 30 && g_raster_checks == 0) {                  // never exercised after ~0.5s: cold NOW -> remember for cheap retry (it may warm up in gameplay)
-        U64 cc = g_raster_cand; I64 cq, dup = 0; g_raster_cand = 0; g_raster_verify = 0;
-        for (cq = 0; cq < g_cold_n; cq++) if (g_raster_cold[cq] == cc) dup = 1;
-        if (!dup && g_cold_n < 8) { g_raster_cold[g_cold_n] = cc; g_cold_n++; }
-        g_jit_n[(cc ^ (cc >> 16)) & 0xFFFF] = -1; HookClrAt(cc); }
-    }
-  } else { if (g_raster_n || g_raster_cand || g_raster_ret) { U64 xa; I64 xq;       // game exited: clear every raster hook bit (the code pages get reused)
-      xa = g_raster_cand; g_raster_cand = 0; HookClrAt(xa); if (g_raster_ret) RetHookClr();
-      while (g_raster_n) { g_raster_n--; xa = g_raster_hle[g_raster_n]; g_raster_hle[g_raster_n] = 0; HookClrAt(xa); g_jit_n[(xa ^ (xa >> 16)) & 0xFFFF] = -1; } }
-    g_raster_verify = 0; g_rej_n = 0; g_raster_tries = 0; g_raster_scan_from = 0x11000000; g_cold_n = 0; g_cold_i = 0; }
-  // Wall-clock pacing: advance guest time by the real frame delta (dt ms) spread over B instructions,
-  // so the clock + animations track real time no matter how fast we emulate (was running ~10x fast).
-  I64 dt = __host_dt(); if (dt < 1) dt = 1; else if (dt > 100) dt = 100;
-  I64 B = __host_budget(); if (B < 50000) B = 50000;
-  pit_div = B / dt; if (pit_div < 1) pit_div = 1; pit_counter = pit_div;   // dt PIT ticks/frame
-  // Q16 fixed-point clock rates (integer ticks/instr truncated badly: the JIT era's 1.6 -> 1 ran tS at
-  // 0.63x real; sub-tick precision keeps guest time exact at any MIPS). Target: 1e6 TSC + 1e5 HPET / ms.
-  g_tsc_q16 = (1000000 * dt << 16) / B; if (g_tsc_q16 < 1) g_tsc_q16 = 1; g_hpet_q16 = (100000 * dt << 16) / B; if (g_hpet_q16 < 1) g_hpet_q16 = 1;
-  tsc_rate = g_tsc_q16 >> 16; if (tsc_rate < 1) tsc_rate = 1;              // legacy approx (RunTo HLE path only)
-  g_budget = icount + B;               // run exactly B instrs (no drift if a prior frame fell short)
-  Run(g_budget); Present(); }
+  I64 ns=__host_ns(),budget=__host_budget();
+  ns=ClampI64(ns,0,100000000);
+  budget=MaxI64(budget,1);
+  TimeFrame(ns,budget);
+  g_budget=icount+budget;
+  Run(g_budget);
+  Present;
+}
 
 U0 HookArm(U64 a)
 {
   if (a) g_hooktbl[a&0xFFFF]=1;
 }
 
+U0 RasterArm(U8 *name)
+{//The guest's named graphics routine, independent of its caller.
+  U64 a=GuestFun(name);
+  I64 slot;
+  if (a && g_raster_n<2) {
+    g_raster_hle[g_raster_n++]=a;
+    HookArm(a);
+    slot=(a^(a>>16))&0xFFFF;
+    g_jit_rip[slot]=a;
+    g_jit_n[slot]=-2;
+  }
+}
+
 U0 HooksArm()
 {//The fast paths, at the guest's own functions. The capture is where
 //GrUpdateScrn goes on after its DCDel, with gr.dc2 drawn, mouse and all.
   I64 slot;
+  g_dc_transform=GuestFun("DCTransform");
   HookArm(g_hle_blit=GuestFun("DCBlotColor8"));
   HookArm(g_capture_rip=GuestCallRet(GuestFun("GrUpdateScrn"),
 	GuestFun("DCDel"),1024));
   HookArm(g_skip_c4=GuestFun("DCBlotColor4"));
   HookArm(g_skip_vga=GuestFun("GrUpdateVGAGraphics"));
   HookArm(g_skip_xlat=GuestFun("GrUpdateLine64"));
-  HookArm(g_skip_bg=GuestFun("GrUpdateTextFG"));
+  RasterArm("GrHLine");
+  RasterArm("GrVLine");
   if (g_poly3_hle=GuestFun("GrFillPoly3")) {
     HookArm(g_poly3_hle);
     slot=(g_poly3_hle^g_poly3_hle>>16)&0xFFFF;
     g_jit_rip[slot]=g_poly3_hle;
     g_jit_n[slot]=-2;
   }
-#ifdef SMP_SNAP
-#else
-//The single core snapshot was taken with the WinMgr parked: its next
-//refresh time is far from the resumed tS. Zero it so SleepUntil wakes soon.
-  *(F64 *)(mem+guest.winmgr_ideal_refresh_tS)=0;
-  *(F64 *)(mem+guest.winmgr_last_refresh_tS)=0;
-  *(F64 *)(mem+guest.winmgr_fps)=31.25;
-#endif
   mem[guest.ms_hard_installed]=1;
 }
 
@@ -218,9 +109,19 @@ U0 HemuInit()                          // once: guest RAM, the snapshot, registe
   InitMem(RAM_SIZE + SCR_SIZE); VgaPaletteInit;      // 384 MiB guest RAM + the 16 MiB host/guest scratch window above it
   __snap_load(mem);                  // host copies the TempleOS RAM snapshot into guest memory
   g_gc_sentinel = RAM_SIZE + SCR_SIZE - 16; mem[g_gc_sentinel] = 0xF4;   // injected-call return sentinel: a HLT byte, never legitimately executed
+  TimeRst;
   SetSnapRegs();
-  if (g_names_ok=GuestNamesFind(g_cpu_st[0].f_msr_fsbase))
+  if (g_names_ok=GuestNamesFind(g_cpu_st[0].f_msr_fsbase)) {
+    hpet_freq=GuestU64(GuestVarMember("cnts","CCntsGlbls","HPET_freq"));
+    //The old RAM snapshots omit device registers. Resume their last
+    //display time, so outstanding tS deadlines remain in the same epoch.
+    F64 resume_tS=*(F64 *)(mem+guest.winmgr_last_refresh_tS);
+    I64 resume_ns=resume_tS*NS_SEC,resume_ticks=resume_tS*hpet_freq;
+    tsc=resume_ns;
+    hpet_ctr=GuestU64(GuestVarMember("cnts","CCntsGlbls","HPET_initial"))+
+          resume_ticks;
     HooksArm;
+  }
   else
     "HEMU: this guest lacks a name HEMU needs; emulating only.\n";
   g_jit_on=CoreAttach;

@@ -14,25 +14,20 @@ U0 InitMem(U64 sz)
 {
   I64 i;
   mem = MAlloc(sz + 16); mem_size = sz;                       // +16 pad absorbs boundary-spanning reads
-  for (i = 0; i < 256; i++) g_pfx[i] = 0; g_pfx[0x66] = 1; g_pfx[0x67] = 1; g_pfx[0xF0] = 1; g_pfx[0xF2] = 1; g_pfx[0xF3] = 1; g_pfx[0x2E] = 1; g_pfx[0x36] = 1; g_pfx[0x3E] = 1; g_pfx[0x26] = 1; g_pfx[0x64] = 1; g_pfx[0x65] = 1; g_desk = MAlloc(307200); g_hpet_rate = 33;
+  for (i = 0; i < 256; i++) g_pfx[i] = 0; g_pfx[0x66] = 1; g_pfx[0x67] = 1; g_pfx[0xF0] = 1; g_pfx[0xF2] = 1; g_pfx[0xF3] = 1; g_pfx[0x2E] = 1; g_pfx[0x36] = 1; g_pfx[0x3E] = 1; g_pfx[0x26] = 1; g_pfx[0x64] = 1; g_pfx[0x65] = 1; g_desk = MAlloc(307200);
   ata_buf = MAlloc(131072);                                  // 256 sectors * 512 B: ATA PIO read staging
 }
 #include "sym.HC" //HEMU finds what it needs in the guest by name.
 
-// PER-CORE state (reg/rip/rfl/halted/irq_stall/fpu/seg/decode) lives in CCpuState g_cpu_st[] - defined in
-// core.HC (included above), accessed through #define reg CST.f_reg etc. (CST = this instance's MyCore()
-// slot). SHARED state (mem, devices, JIT cache, icount, tsc, cr*, idtr/gdtr) stays below.
-I64 icount;
+// PER-CORE state (reg/rip/rfl/halted/irq_stall/fpu/seg/decode/icount) lives in CCpuState g_cpu_st[] - defined
+// in core.HC (included above), accessed through #define reg CST.f_reg etc. (CST = this instance's MyCore()
+// slot). SHARED state (mem, devices, JIT cache, clocks, cr*, idtr/gdtr) stays below.
 U64 g_hle_blit;                      // entry addr of the transparent compositor blit to run natively (0=off)
 U8 *g_desk;                          // last COMPLETE frame (desktop + the OS's own cursor), captured tear-free
-I64 g_desk_ready; U64 g_capture_rip;
+I64 g_desk_ready,g_desk_seq,g_present_seq; U64 g_capture_rip;
 U64 g_skip_c4, g_skip_vga, g_skip_xlat;  // DEAD dc2->VGA output paths (hemu presents dc2 directly, so the OS's
                                      // dc2->VGA color/planar conversion produces nothing we use): DCBlotColor4
                                      // (4 args), GrUpdateVGAGraphics (0 args), the XLAT palette scanline blit (4 args)
-U64 g_skip_bg;                       // the desktop text/content render (0 args) - LIVE for the desktop, but pure
-                                     // waste behind a fullscreen game; skipped only while g_game_running.
-U64 g_game_running;                  // set by WakeTasks each frame: a task is suspended on its PopUp (a fullscreen
-                                     // game/app is up), so the desktop windows behind it are hidden -> don't redraw
 U64 g_jit_on;                        // 0 = pure interpreter (zero-init; a JIT host sets it 1 after wiring __jit_*).
 U64 g_jit_rip[65536];                // direct-mapped block cache: the rip occupying slot ((rip^(rip>>16)) & 0xFFFF)
                                      // (hash, not plain low bits: game code copies sit 0x40000/0xA0000 apart ->
@@ -49,23 +44,16 @@ U64 ata_words, ata_seccnt, ata_pos, ata_r3, ata_r4, ata_r5;   // ATA PIO read - 
 U64 ata_wr, ata_wlba, ata_wcnt;                              // ATA PIO write in progress (lba, count) -> __host_disk_wr
 U8 *ata_buf;
 // g_seg[8] moved into CCpuState (per-core)
-U64 g_hpet_rate; //Wall-clock pacing: HPET ticks an instruction.
 U64 g_badop;
 // system state: control regs, descriptor tables, MSRs, TSC, code/stack segments
-U64 cr0, cr2, cr3, cr4, cr8, g_cs, g_ss; U64 idtr_base, idtr_limit, gdtr_base, gdtr_limit, tsc;
-I64 g_tsc_q16, g_tsc_acc;            // TSC advance per instruction in Q16 fixed-point + fractional accumulator.
-I64 g_hpet_q16, g_hpet_acc;          // Same for the HPET counter. Integer rates truncated badly (e.g. the JIT era's
-                                     // 1.6 ticks/instr -> 1 = guest tS at 0.63x real), so sub-tick precision matters.
-I64 tsc_rate;                        // TSC ticks added per executed instruction (0 = off, for tests).
-                                     // TempleOS time (tS, etc.) is GetTSC/cnts.time_stamp_freq, so the
-                                     // TSC must continue from the snapshot value and advance, or all
-                                     // time freezes. The snapshot restores tsc + sets tsc_rate.
+U64 cr0, cr2, cr3, cr4, cr8, g_cs, g_ss; U64 idtr_base, idtr_limit, gdtr_base, gdtr_limit;
 U64 msr_efer, msr_star, msr_lstar, msr_sfmask, msr_kgsbase, msr_apic;   // msr_fsbase/msr_gsbase moved into CCpuState (per-core)
 U64 g_xmm_lo[NCORES][16], g_xmm_hi[NCORES][16];   // SSE XMM registers - PER-CORE (xmm_lo/xmm_hi #defines in core.HC): an AP suspended mid-XMM must not be clobbered by another core
 I64 g_lockf[NCORES];                  // PER-CORE: 1 = the current instruction had a 0xF0 LOCK prefix (lockf #define in core.HC) - makes the RMW atomic on shared memory
 // fsc/fpr/fsp/x87_cw/x87_sw moved into CCpuState (per-core)
 // devices: dual 8259 PICs + 8254 PIT (channel 0 -> IRQ0 = the scheduler tick)
-I64 pic1_base, pic1_mask, pic1_irr, pic1_isr, pic1_initstep; I64 pic2_base, pic2_mask, pic2_irr, pic2_isr, pic2_initstep; I64 pit_reload, pit_div, pit_counter, pit_wlo;
+I64 pic1_base, pic1_mask, pic1_irr, pic1_isr, pic1_initstep; I64 pic2_base, pic2_mask, pic2_irr, pic2_isr, pic2_initstep;
+#include "time.HC"
 I64 irq_count;                       // # of hardware IRQs delivered (instrumentation)
 // CMOS RTC (ports 0x70/0x71): TempleOS reads wall-clock time here; tS/Now() and
 // many task timeouts derive from it, so it must ADVANCE or the desktop never wakes.
@@ -94,7 +82,6 @@ U0 InjectMouse(I64 b0, I64 b1, I64 b2) { ms_byte0=b0; ms_byte1=b1; ms_byte2=b2; 
 // MMIO: any guest access at/above mem_size goes here. LAPIC/HPET/IOAPIC live high
 // in the physical map and are NOT in the RAM snapshot, so we emulate the few
 // registers TempleOS reads and swallow the rest (instead of trapping out-of-bounds).
-U64 hpet_ctr;                        // synthetic HPET main counter (monotonic)
 U64 lapic_base;                      // discovered base of the LAPIC uncached alias (page-aligned)
 U64 hpet_base;                       // discovered base of the HPET alias
 
@@ -365,7 +352,7 @@ U64 IoIn(U64 port)
   if(port==0x3C9){U64 value=vga_dac[vga_read_pos];vga_read_pos=(vga_read_pos+1)%768;return value;}
   if(port==0x3C8)return vga_write_pos/3;
   if(port==0x3C6)return 255;
-  if (port == 0x21) return pic1_mask; if (port == 0xA1) return pic2_mask; if (port == 0x40) return pit_counter & 0xFF; if (port == 0x71) return RtcRead(rtc_idx);
+  if (port == 0x21) return pic1_mask; if (port == 0xA1) return pic2_mask; if (port == 0x40) return PitRead; if (port == 0x71) return RtcRead(rtc_idx);
   if (port == 0x60) {                                  // PS/2 data: cmd-response, then mouse, then kbd
     if (ps2qh != ps2qt) { I64 b = ps2q[ps2qh & 15]; ps2qh++; return b; }  // command ACK/reset bytes
     if (ms_has) {
@@ -434,7 +421,10 @@ U0 IoOut(U64 port, U64 v)
     if (v == 0xFF) Ps2Resp(0xAA, 0);                    // kbd reset -> BAT ok
     return; }
   if (port == 0x70) { rtc_idx = v & 0x7F; return; }     // CMOS register select (bit7 = NMI disable)
-  if (port == 0x43) { if ((v & 0xC0) == 0x80) pit2_wlo = 1; return; }   // PIT command: ch2 select
+  if (port == 0x43) {                                   // PIT command: bits 6 and 7 pick the channel
+    if ((v & 0xC0) == 0x80) pit2_wlo = 1;
+    else if (!(v & 0xC0)) PitCmd(v);
+    return; }
   if (port == 0x42) {                                   // PIT ch2 reload (lo then hi) = speaker tone
     if (pit2_wlo) { pit2_reload = v; pit2_wlo = 0; }
     else { pit2_reload |= v << 8; pit2_div = pit2_reload; pit2_wlo = 1; UpdateSpk(); }
@@ -452,8 +442,6 @@ U0 IoOut(U64 port, U64 v)
   } else if (port == 0xA1) {
     if (pic2_initstep == 1) { pic2_base = v; pic2_initstep = 2; }
     else if (pic2_initstep == 2) pic2_initstep = 3; else if (pic2_initstep == 3) pic2_initstep = 0; else pic2_mask = v;
-  } else if (port == 0x43) {                             // PIT control word -> next two 0x40 writes are lo,hi
-    pit_wlo = 1;
   } else if (port == 0x40) {                             // PIT ch0 reload
     if (pit_wlo) { pit_reload = v; pit_wlo = 0; }
     else { pit_reload |= (v << 8); pit_div = pit_reload; if (!pit_div) pit_div = 65536; pit_counter = pit_div; pit_wlo = 1; } } }
@@ -750,7 +738,7 @@ U0 Op0F()
     case 0x22: DecodeModRM(); if (rg==0) cr0=reg[rm]; else if (rg==2) cr2=reg[rm]; else if (rg==3) cr3=reg[rm]; else if (rg==4) cr4=reg[rm]; else if (rg==8) cr8=reg[rm]; break;             // MOV CR,r
     case 0x21: DecodeModRM(); reg[rm]=0; break;                          // MOV r,DR (stub: debug regs read 0)
     case 0x23: DecodeModRM(); break;                                     // MOV DR,r (stub)
-    case 0x31: tsc += 100; reg[0]=tsc & 0xFFFFFFFF; reg[2]=(tsc>>32)&0xFFFFFFFF; break;                        // RDTSC
+    case 0x31: TscRead; reg[0]=tsc & 0xFFFFFFFF; reg[2]=(tsc>>32)&0xFFFFFFFF; break;                        // RDTSC
     case 0x30: WrMsr(reg[1]&0xFFFFFFFF, ((reg[2]&0xFFFFFFFF)<<32)|(reg[0]&0xFFFFFFFF)); break;                // WRMSR
     case 0x32: v=RdMsr(reg[1]&0xFFFFFFFF); reg[0]=v&0xFFFFFFFF; reg[2]=(v>>32)&0xFFFFFFFF; break;             // RDMSR
     case 0xA2: Cpuid(); break;                                           // CPUID
@@ -815,10 +803,12 @@ U0 HleBlit()
 U0 CaptureFrom(U64 bd)
 {//The finished 640x480 frame at bd into g_desk.
   I64 k;
-  if (bd && bd+307200<=mem_size) {
+  if (bd && bd+307200<=mem_size && __capture_lock) {
     for (k=0;k<307200;k++)
       g_desk[k]=mem[bd+k];
     g_desk_ready=1;
+    g_desk_seq++;
+    __capture_unlock;
   }
 }
 
@@ -827,23 +817,9 @@ U0 CaptureDesk()
   CaptureFrom(RdMem(RdMem(guest.gr_dc2,8)+of_dc.body,8));
 }
 
-// ---- HLE the hot z-buffered span-filler GrFillRow(dc,x1,x2,y,z1,z2) = 0x1152cc28 in the fixed Varoom
-// build (~34% of frame + the per-pixel Rand-dither 11.5% that lives INSIDE it). Native reimplementation
-// of the per-scanline 3D fill: DC-offset, bbox, clip, z-interpolated depth test, 3 draw modes, ordered+
-// random dither, collision metric/counter. Bit-exact for geometry+collision; dither matches except the
-// per-instruction batch-tsc drift (cosmetic, already non-deterministic interp-vs-JIT). Returns 1=handled
-// (caller frame popped), 0=fall through to the interpreter for the cases we deliberately don't replicate.
-// See memory hemu-raster-hle-spec for the full contract. DEFAULT OFF (g_raster_hle=0); harness/Init arms it.
-U64 g_raster_hle[4], g_raster_cand; I64 g_raster_n, g_raster_calls;  // ACTIVE copies (TempleOS compiles the Gr routine several times - arm them ALL) + the candidate under verify
-U64 g_poly3_hle; I64 g_poly3_calls, g_poly3_diag;  // HLE of GrFillPoly3 (the z-buffered filled-3D-poly the face-rasterizer uses): do the whole fan + edge-walk + span NATIVELY instead of the JIT'd GrFillTri0. Armed by HooksArm at the guest's GrFillPoly3.
-// shadow-verify (g_raster_verify=1): run native into a span, capture the z-buffer + collision counters,
-// RESTORE the real buffers, fall through to the emulator, then compare at the return hook. z-buffer +
-// collision are dither-independent, so an exact match proves geometry + gameplay are bit-correct (dither
-// colors may differ - they already do interp-vs-JIT). g_raster_diffs/g_raster_checks tally the result.
-U64 g_raster_verify, g_raster_ret, g_rv_zbuf, g_rv_dc, g_rv_c1, g_rv_c2, g_rv_icount, g_rv_irqc;
-U64 g_dbg_bad[13]; I64 g_dbg_badn;       // forensics: first failing verify (zbad,bod,cnt,idx,flags,colw,c1 e/n,c2 e/n,z e/n,zj)
-U64 g_ctr_rip; I64 g_ctr_n;              // diag: count executions of one rip (arm: poke g_ctr_rip + its g_hooktbl bit)
-I64 g_rv_idx, g_rv_cnt, g_rv_step = 1, g_raster_diffs, g_raster_checks, g_rv_bodydiff; U8  g_rv_savb[1024]; U32 g_rv_savz[1024], g_rv_natz[1024], g_rv_natb[1024];
+U64 g_raster_hle[2],g_poly3_hle,g_dc_transform;
+I64 g_raster_n,g_raster_calls,g_poly3_calls;
+U64 g_ctr_rip; I64 g_ctr_n;
 //See $LK,"::/Doc/Credits.DD"$.
 #define LIN_CONGRUE_A	6364136223846793005
 #define LIN_CONGRUE_C	1442695040888963407
@@ -853,125 +829,16 @@ U16 RasterRand(U64 fsb)
   U64 seed=*(U64 *)(mem+fsb+of_task.rand_seed);
   seed=LIN_CONGRUE_A*seed^(seed&0xFFFFFFFF0000)>>16;
   seed+=LIN_CONGRUE_C;
-  if (!(*(U32 *)(mem+fsb+of_task.task_flags)>>TASKf_NONTIMER_RAND&1)) {
-    tsc+=100;
-    seed^=tsc;
-  }
+  if (!(*(U32 *)(mem+fsb+of_task.task_flags)>>TASKf_NONTIMER_RAND&1))
+    seed^=TscRead;
   *(U64 *)(mem+fsb+of_task.rand_seed)=seed;
   return seed&0xFFFF;
 }
 I64 RasterDone(I64 cnt)                              // RAX=cnt, pop ret + 6 args (callee-pop), return to caller
 { reg[0] = cnt; rip = RdMem(reg[4], 8); reg[4] += 8 + 6 * 8; return 1; }
 
-// ===== HLE GrFillPoly3 ============================================================================
-// One filled, z-buffered HORIZONTAL span (mirrors RasterHLE's vert=0 path: DC offset + bbox + clip +
-// per-pixel z-test + probability dither + write). Used by the native poly rasterizer below.
-U0 PolySpan(U64 dc, I64 x1, I64 x2, I64 y, I64 z1, I64 z2)
-{
-  U64 body = *(U64 *)(mem + dc + of_dc.body), zbuf = *(U64 *)(mem + dc + of_dc.depth_buf), win = *(U64 *)(mem + dc + of_dc.win_task), fsb = msr_fsbase;
-  U32 flags = *(U32 *)(mem + dc + of_dc.flags), col_w = *(U32 *)(mem + dc + of_dc.color);
-  I64 stride = *(I32 *)(mem + dc + of_dc.width_internal), dimA = *(I32 *)(mem + dc + of_dc.width), dimC = *(I32 *)(mem + dc + of_dc.height);
-  I64 i, idx, zptr, zslope = 0, zacc, cur_z, clip_lo = 0, clip_hi = 0, count, mode, color, w1, w2, cw;
-  I64 dith_en = 0, dith_rand = 0, bg = *(U32 *)(mem + dc + of_dc.bkcolor) & 0xFF;
-  if (!body || !zbuf) return;
-  if ((flags >> 0xe) & 1) { x1 += *(I64 *)(mem + win + of_task.scroll_x); x2 += *(I64 *)(mem + win + of_task.scroll_x); y += *(I64 *)(mem + win + of_task.scroll_y); z1 += *(I64 *)(mem + win + of_task.scroll_z); z2 += *(I64 *)(mem + win + of_task.scroll_z); }
-  if ((flags >> 0x10) & 1) {
-    if (x1 < *(I64 *)(mem + dc + of_dc.min_x)) *(I64 *)(mem + dc + of_dc.min_x) = x1; if (x1 > *(I64 *)(mem + dc + of_dc.max_x)) *(I64 *)(mem + dc + of_dc.max_x) = x1;
-    if (x2 < *(I64 *)(mem + dc + of_dc.min_x)) *(I64 *)(mem + dc + of_dc.min_x) = x2; if (x2 > *(I64 *)(mem + dc + of_dc.max_x)) *(I64 *)(mem + dc + of_dc.max_x) = x2;
-    if (y  < *(I64 *)(mem + dc + of_dc.min_y)) *(I64 *)(mem + dc + of_dc.min_y) = y;  if (y  > *(I64 *)(mem + dc + of_dc.max_y)) *(I64 *)(mem + dc + of_dc.max_y) = y; }
-  if (y < 0) return;
-  if (x2 < x1) { i = x1; x1 = x2; x2 = i; i = z1; z1 = z2; z2 = i; }
-  if (x2 < 0) return;
-  if (x1 < 0) { clip_lo = -x1; x1 = 0; }
-  if ((flags >> 0xe) & 1) {
-    x1 += *(I64 *)(mem + win + of_task.pix_left); x2 += *(I64 *)(mem + win + of_task.pix_left); if (x1 > *(I64 *)(mem + win + of_task.pix_right)) return;
-    if (x2 > *(I64 *)(mem + win + of_task.pix_right)) { clip_hi = x2 - *(I64 *)(mem + win + of_task.pix_right); x2 = *(I64 *)(mem + win + of_task.pix_right); }
-    y += *(I64 *)(mem + win + of_task.pix_top); if (y < 0) return; if (y > *(I64 *)(mem + win + of_task.pix_bottom)) return; if (x2 < 0) return; }
-  if (x1 >= dimA) return; if (y >= dimC) return;
-  if (x2 >= dimA) x2 = dimA - 1;
-  count = x2 - x1; idx = y * stride + x1;
-  if (idx < 0 || (x2 - x1 + 1) > 8192 || body + idx + (x2 - x1 + 1) >= mem_size || zbuf + (idx + (x2 - x1 + 1)) * 4 >= mem_size) return;   // bounds guard
-  zptr = zbuf + idx * 4; if (count) zslope = ((z2 - z1) << 32) / count; zacc = z1 << 32; zacc += clip_lo * zslope;
-  color = col_w & 0xFF; w1 = col_w & 0xFFFF; w2 = (col_w >> 16) & 0xFFFF; cw = w1;
-  if ((col_w >> 24) & 0xC0) { dith_en = 1; w2 = (w2 & 0xFF) | (w1 & 0xFF00);
-    if ((col_w >> 24) & 0x80) { dith_rand = 1; if (RasterRand(fsb) < *(U64 *)(mem + dc + of_dc.dither_probability_u16)) cw = w2; }
-    else { if ((x1 ^ y) & 1) { i = w1; w1 = w2; w2 = i; } cw = w1; } }
-  for (i = x1; i <= x2; i++) {
-    cur_z = zacc >> 32;
-    I64 draw = 1; if (cur_z < 0) draw = 0; else if (cur_z > *(I32 *)(mem + zptr)) draw = 0; else *(I32 *)(mem + zptr) = cur_z;
-    if (draw) { color = cw & 0xFF; mode = (cw >> 8) & 0xFF;
-      if (mode == 1) mem[body + idx] ^= color; else if (mode == 2) { I64 v = mem[body + idx]; if (v != 0xFF && v != bg) (*(U64 *)(mem + dc + of_dc.collision_cnt))++; } else mem[body + idx] = color; }
-    if (dith_en) { if (dith_rand) { if (RasterRand(fsb) < *(U64 *)(mem + dc + of_dc.dither_probability_u16)) cw = w2; else cw = w1; } else { I64 t = w1; w1 = w2; w2 = t; cw = w1; } }
-    idx += 1; zptr += 4; zacc += zslope; }
-}
-
-// scanline-rasterize one triangle (screen coords + per-vertex z), z-interpolated, into horizontal spans.
-U0 PolyTri(U64 dc, I64 ax, I64 ay, I64 az, I64 bx, I64 by, I64 bz, I64 cx, I64 cy, I64 cz)
-{
-  I64 tx, ty, tz, y, xl, xr, zl, zr;
-  F64 tac, xac, zac, xs, zs, tt;
-  if (ay > by) { tx=ax;ax=bx;bx=tx; ty=ay;ay=by;by=ty; tz=az;az=bz;bz=tz; }   // sort a<=b<=c by y
-  if (ay > cy) { tx=ax;ax=cx;cx=tx; ty=ay;ay=cy;cy=ty; tz=az;az=cz;cz=tz; }
-  if (by > cy) { tx=bx;bx=cx;cx=tx; ty=by;by=cy;cy=ty; tz=bz;bz=cz;cz=tz; }
-  if (cy == ay) return;                                                       // zero height
-  for (y = ay; y <= cy; y++) {
-    tac = IntToF64(y - ay) / IntToF64(cy - ay);                               // long edge a->c
-    xac = ax + tac * (cx - ax); zac = az + tac * (cz - az);
-    if (y < by) { if (by == ay) { xs = ax; zs = az; } else { tt = IntToF64(y - ay) / IntToF64(by - ay); xs = ax + tt * (bx - ax); zs = az + tt * (bz - az); } }
-    else        { if (cy == by) { xs = bx; zs = bz; } else { tt = IntToF64(y - by) / IntToF64(cy - by); xs = bx + tt * (cx - bx); zs = bz + tt * (cz - bz); } }
-    if (xac <= xs) { xl = xac; xr = xs; zl = zac; zr = zs; } else { xl = xs; xr = xac; zl = zs; zr = zac; }
-    PolySpan(dc, xl, xr, y, zl, zr);
-  }
-}
-
-I64 PolyDone(I64 cnt) { reg[0] = cnt; rip = RdMem(reg[4], 8); reg[4] += 8 + 3 * 8; return 1; }   // GrFillPoly3 has 3 args (callee-pop)
-
-I64 GrPoly3HLE()        // fires at GrFillPoly3's prologue: fan-triangulate the convex poly + raster each tri natively
-{
-  U64 dc, poly, body, zbuf, rmat; I64 n, i, S = 12, ax, ay, az, bx, by, bz, cx, cy, cz;   // CD3I32 = {I32 x,y,z} = 12 bytes
-  dc = RdMem(reg[4] + 8, 8); n = RdMem(reg[4] + 0x10, 8); poly = RdMem(reg[4] + 0x18, 8);
-  body = *(U64 *)(mem + dc + of_dc.body); zbuf = *(U64 *)(mem + dc + of_dc.depth_buf);
-  if (n < 3 || n > 64 || !body || !zbuf) return 0;                            // no z-buffer / odd n -> let the OS emulate
-  if (poly + n * S >= mem_size) return 0;
-  // We rasterize poly points as SCREEN coords. The real GrFillPoly3 first runs dc->transform on every
-  // point (Mat4x4 by dc->r + dc->x/y/z offset, or a custom projection). Only the identity case is truly
-  // screen-space (e.g. HolyCraft, which pre-projects and passes screen polys). If the DC carries a real
-  // transform (Castle Frankenstein's 3D walls set dc->transform=CFTransform + a rotation dc->r), fall
-  // back to the OS's GrFillPoly3 so it transforms first. CDC offsets are stable across builds:
-  // dc->x/y/z @0xD8/0xDC/0xE0 (I32), dc->r @0xC8 (-> 4x4 matrix; identity = 0x100000000 on the diagonal).
-  if (*(I32 *)(mem + dc + of_dc.x) || *(I32 *)(mem + dc + of_dc.y) || *(I32 *)(mem + dc + of_dc.z)) return 0;
-  rmat = *(U64 *)(mem + dc + of_dc.r); if (!rmat) return 0;
-  for (i = 0; i < 16; i++) {
-    if (i == 0 || i == 5 || i == 10 || i == 15) { if (*(I64 *)(mem + rmat + i * 8) != 0x100000000) return 0; }
-    else if (*(I64 *)(mem + rmat + i * 8)) return 0;
-  }
-  ax = *(I32 *)(mem + poly); ay = *(I32 *)(mem + poly + 4); az = *(I32 *)(mem + poly + 8);   // fan from poly[0]
-  if (!g_poly3_diag) for (i = 1; i < n - 1; i++) {                                          // g_poly3_diag=1 -> skip fill (isolate arm/return)
-    bx = *(I32 *)(mem + poly + i * S);     by = *(I32 *)(mem + poly + i * S + 4);     bz = *(I32 *)(mem + poly + i * S + 8);
-    cx = *(I32 *)(mem + poly + (i + 1) * S); cy = *(I32 *)(mem + poly + (i + 1) * S + 4); cz = *(I32 *)(mem + poly + (i + 1) * S + 8);
-    PolyTri(dc, ax, ay, az, bx, by, bz, cx, cy, cz);
-  }
-  g_poly3_calls++;
-  return PolyDone(0);
-}
-
-I64 RasterHLE()
-{
-  if (rip == g_poly3_hle && g_poly3_hle && mem[rip] == 0x55 && mem[rip + 7] == 0x58) return GrPoly3HLE();   // GrFillPoly3 (sub rsp,0x58) -> native poly fill
-  // safety: only act if rip really is the span-filler prologue (push rbp; mov rbp,rsp via 48 8b ec;
-  // sub rsp,0x78) - the armed address is build-specific, so a stale/wrong arm just falls through.
-  if (mem[rip] != 0x55 || mem[rip + 1] != 0x48 || mem[rip + 2] != 0x8B || mem[rip + 3] != 0xEC ||
-      mem[rip + 4] != 0x48 || mem[rip + 5] != 0x83 || mem[rip + 6] != 0xEC || mem[rip + 7] != 0x78) return 0;
-  U64 dc = RdMem(reg[4] + 8, 8);
-  // ORIENTATION: the signature matches BOTH GrHLine and GrVLine (transposed source copies with identical
-  // prologue + field loads - Varoom's "second copy" 0x1151b628 is really GrVLine). The `mov r12,[rbp+disp]`
-  // displacement byte at +0x1d loads the FIXED coordinate: 0x28 (arg3 y) = HLine, 0x18 (arg1 x) = VLine.
-  // Below, x1/x2 = the MOVING span start/end and y = the FIXED coord; vert transposes every field role.
-  I64 vert = 0; if (mem[rip + 0x1d] == 0x18) vert = 1; else if (mem[rip + 0x1d] != 0x28) return 0;
-  I64 x1, x2, y;
-  if (vert) { y = RdMem(reg[4] + 0x10, 8); x1 = RdMem(reg[4] + 0x18, 8); x2 = RdMem(reg[4] + 0x20, 8); }
-  else { x1 = RdMem(reg[4] + 0x10, 8); x2 = RdMem(reg[4] + 0x18, 8); y = RdMem(reg[4] + 0x20, 8); }
-  I64 z1 = RdMem(reg[4] + 0x28, 8), z2 = RdMem(reg[4] + 0x30, 8);
+I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
+{//GrHLine and GrVLine: one clipping, depth and raster-operation path.
   U32 flags = *(U32 *)(mem + dc + of_dc.flags);
   U64 zbuf = *(U64 *)(mem + dc + of_dc.depth_buf), win = *(U64 *)(mem + dc + of_dc.win_task);
   U64 body = *(U64 *)(mem + dc + of_dc.body), fsb = msr_fsbase;
@@ -979,7 +846,7 @@ I64 RasterHLE()
   U32 col_w = *(U32 *)(mem + dc + of_dc.color); 	    // packed: b0=color, b1=draw-mode, b2=color2, b3=dither flags
   I64 bg = *(U32 *)(mem + dc + of_dc.bkcolor) & 0xFF;
   I64 clip_lo = 0, clip_hi = 0, plotcnt = 0, i, idx, zptr, zslope = 0, zacc, cur_z; I64 dith_en = 0, dith_rand = 0, mode, color, w1, w2, cw;
-  if (!zbuf) return 0;                                                            // no-z fast-fill path -> emulate
+  if (!zbuf) return -1;                                                            // no-z fast-fill path -> emulate
   I64 dimA = width, dimC = height, step = 1;        // moving-axis limit / fixed-axis limit / pixel stride
   I64 sA = of_task.scroll_x, sC = of_task.scroll_y, eA = of_dc.min_x, eAh = of_dc.max_x, eC = of_dc.min_y, eCh = of_dc.max_y, pA = of_task.pix_left, pAl = of_task.pix_right, pC = of_task.pix_top, pCl = of_task.pix_bottom, nA = of_dc.cur_x, nC = of_dc.cur_y;
   if (vert) { dimA = height; dimC = width; step = stride; sA = of_task.scroll_y; sC = of_task.scroll_x; eA = of_dc.min_y; eAh = of_dc.max_y; eC = of_dc.min_x; eCh = of_dc.max_x; pA = of_task.pix_top; pAl = of_task.pix_bottom; pC = of_task.pix_left; pCl = of_task.pix_right; nA = of_dc.cur_y; nC = of_dc.cur_x; }
@@ -989,16 +856,16 @@ I64 RasterHLE()
   if ((flags >> 0x10) & 1) {
     if (x1 < *(I64 *)(mem + dc + eA)) *(I64 *)(mem + dc + eA) = x1; if (x1 > *(I64 *)(mem + dc + eAh)) *(I64 *)(mem + dc + eAh) = x1; if (x2 < *(I64 *)(mem + dc + eA)) *(I64 *)(mem + dc + eA) = x2; if (x2 > *(I64 *)(mem + dc + eAh)) *(I64 *)(mem + dc + eAh) = x2;
     if (y  < *(I64 *)(mem + dc + eC)) *(I64 *)(mem + dc + eC) = y; if (y  > *(I64 *)(mem + dc + eCh)) *(I64 *)(mem + dc + eCh) = y; }
-  if (y < 0) return RasterDone(0);
+  if (y < 0) return 0;
   if (x2 < x1) { i = x1; x1 = x2; x2 = i; i = z1; z1 = z2; z2 = i; }
-  if (x2 < 0) return RasterDone(0);
+  if (x2 < 0) return 0;
   if (x1 < 0) { clip_lo = -x1; x1 = 0; }
   // ---- win clip (flag bit 0xe) ----
   if ((flags >> 0xe) & 1) {
-    x1 += *(I64 *)(mem + win + pA); x2 += *(I64 *)(mem + win + pA); if (x1 > *(I64 *)(mem + win + pAl)) return RasterDone(0);
+    x1 += *(I64 *)(mem + win + pA); x2 += *(I64 *)(mem + win + pA); if (x1 > *(I64 *)(mem + win + pAl)) return 0;
     if (x2 > *(I64 *)(mem + win + pAl)) { clip_hi = x2 - *(I64 *)(mem + win + pAl); x2 = *(I64 *)(mem + win + pAl); }
-    y += *(I64 *)(mem + win + pC); if (y < 0) return RasterDone(0); if (y > *(I64 *)(mem + win + pCl)) return RasterDone(0); if (x2 < 0) return RasterDone(0); }
-  if (x1 >= dimA) return RasterDone(0); if (y >= dimC) return RasterDone(0);
+    y += *(I64 *)(mem + win + pC); if (y < 0) return 0; if (y > *(I64 *)(mem + win + pCl)) return 0; if (x2 < 0) return 0; }
+  if (x1 >= dimA) return 0; if (y >= dimC) return 0;
   // ---- z-slope + accumulator (z interpolates z1..z2 over the ORIGINAL span; clip-adjusted start) ----
   I64 count = (x2 + clip_hi) - (x1 - clip_lo);
   if (vert) idx = x1 * stride + y; else idx = y * stride + x1;
@@ -1010,7 +877,7 @@ I64 RasterHLE()
     else if (cx < x1) { dx = x1 - cx; r13 = dx * dx; }
     else { dx = cx - x2; r13 = dx * dx; }
     I64 dy = y - cy; r13 += dy * dy; if (r13 < *(I64 *)(mem + dc + of_dc.nearest_dist)) *(I64 *)(mem + dc + of_dc.nearest_dist) = r13; }
-  if ((flags >> 0xc) & 1) return RasterDone(0);
+  if ((flags >> 0xc) & 1) return 0;
   // ---- dither setup from the packed color word (b3 bits 0x80=random / 0x40=ordered) ----
   // matches GrHLine exactly (source recovered from the in-RAM kernel text + the compiled jump table):
   // c1.rop is overwritten with c0.rop, probability dither rolls ONCE before pixel 0, ordered dither
@@ -1028,13 +895,9 @@ I64 RasterHLE()
   U64 wzbuf = 0; I64 wzn = 0, cov_row = 0, covM = 1, cc = 1;   // cell = cov_row + (moving>>3)*covM: H walks columns, V walks rows (*80)
   if (vert) covM = 80;
   if (need_cov) { wzbuf = *(U64 *)(mem + guest.gr_win_z_buf); if (wzbuf && wzbuf < mem_size) { wzn = *(U16 *)(mem + win + of_task.win_z_num); if (vert) cov_row = y >> 3; else cov_row = (y >> 3) * 80; cc = wzn >= *(U16 *)(mem + wzbuf + (cov_row + (x1 >> 3) * covM) * 2); } else need_cov = 0; }
-  // bounds guard: a wrong (false-signature-matched) candidate gives garbage args - never write out of RAM.
+  //Malformed drawing contexts fall back to guest code.
   if (idx < 0 || x2 < x1 || (x2 - x1 + 1) > 4096 || !body || body + idx + (x2 - x1 + 1) * step >= mem_size ||
-      zbuf + (idx + (x2 - x1 + 1) * step) * 4 >= mem_size) return 0;
-  // ---- shadow-verify: snapshot the span's body + z-buffer + collision BEFORE the native loop ----
-  if (g_raster_verify && rip == g_raster_cand && g_raster_ret) return 0;   // a verify is already IN FLIGHT (IRQ task-switch re-entered): emulate the nested call, keep the outer shadow state intact
-  I64 idx0 = idx, cnt0 = x2 - x1 + 1, vmode = g_raster_verify && rip == g_raster_cand && cnt0 > 0 && cnt0 <= 1024, vj;
-  if (vmode) { for (vj = 0; vj < cnt0; vj++) { g_rv_savb[vj] = mem[body + idx0 + vj * step]; g_rv_savz[vj] = *(U32 *)(mem + zbuf + (idx0 + vj * step) * 4); } g_rv_c1 = *(U64 *)(mem + dc + of_dc.collision_cnt); g_rv_c2 = *(U64 *)(mem + dc + of_dc.nearest_dist); }
+      zbuf + (idx + (x2 - x1 + 1) * step) * 4 >= mem_size) return -1;
   // ---- per-pixel span (r14 draw-enable is always 1 in the handled case) ----
   for (i = x1; i <= x2; i++) {
     if (cc) { cur_z = zacc >> 32;                      // signed 32-bit current z (z-test+draw gated by char_clear)
@@ -1044,47 +907,76 @@ I64 RasterHLE()
     if (dith_en) { if (dith_rand) { if (RasterRand(fsb) < (*(U64 *)(mem + dc + of_dc.dither_probability_u16))) cw = w2; else cw = w1; } else { I64 t = w1; w1 = w2; w2 = t; cw = w1; } }
     if (need_cov && ((i + 1) & 7) == 0 && i + 1 <= x2) cc = wzn >= *(U16 *)(mem + wzbuf + (cov_row + ((i + 1) >> 3) * covM) * 2);   // recompute char_clear at the next 8-px boundary
     idx += step; zptr += step * 4; zacc += zslope; }
-  if (vmode) {   // capture native z/body/coll, RESTORE the real buffers, fall through -> emulated runs, compare at the return hook
-    U64 nc1 = *(U64 *)(mem + dc + of_dc.collision_cnt), nc2 = *(U64 *)(mem + dc + of_dc.nearest_dist);
-    for (vj = 0; vj < cnt0; vj++) { g_rv_natz[vj] = *(U32 *)(mem + zbuf + (idx0 + vj * step) * 4); g_rv_natb[vj] = mem[body + idx0 + vj * step];
-      mem[body + idx0 + vj * step] = g_rv_savb[vj]; *(U32 *)(mem + zbuf + (idx0 + vj * step) * 4) = g_rv_savz[vj]; }
-    *(U64 *)(mem + dc + of_dc.collision_cnt) = g_rv_c1; *(U64 *)(mem + dc + of_dc.nearest_dist) = g_rv_c2; g_rv_c1 = nc1; g_rv_c2 = nc2; g_rv_idx = idx0; g_rv_cnt = cnt0; g_rv_step = step; g_rv_zbuf = zbuf; g_rv_dc = dc; g_rv_icount = icount; g_rv_irqc = irq_count; g_raster_ret = RdMem(reg[4], 8); g_hooktbl[g_raster_ret & 0xFFFF] = 1;
-    g_jit_n[(g_raster_ret ^ (g_raster_ret >> 16)) & 0xFFFF] = -1; g_jit_hot[(g_raster_ret ^ (g_raster_ret >> 16)) & 0xFFFF] = 0;   // keep the RETURN-ADDRESS block interp'd while a verify is in flight - else the JIT runs the ret and RasterVerifyRet never fires (g_raster_ret stays stuck, every later call early-outs as "re-entered")
-    return 0; }
   g_raster_calls++;
-  return RasterDone(plotcnt); }
-U0 HookClrAt(U64 a)   // clear a's g_hooktbl bit (a stale bit pins a hot game rip to the interpreter
-{                     // forever) - unless a permanent hook / active HLE / live candidate / live verify-ret shares the slot
-  I64 s = a & 0xFFFF, q; if (!a) return;
-  if (s == (g_hle_blit & 0xFFFF) || s == (g_capture_rip & 0xFFFF) || s == (g_skip_c4 & 0xFFFF) || s == (g_skip_vga & 0xFFFF) || s == (g_skip_xlat & 0xFFFF) || s == (g_skip_bg & 0xFFFF)) return;
-  if (g_raster_cand && s == (g_raster_cand & 0xFFFF)) return;
-  if (g_raster_ret  && s == (g_raster_ret  & 0xFFFF)) return;
-  for (q = 0; q < g_raster_n; q++) if (s == (g_raster_hle[q] & 0xFFFF)) return;
-  g_hooktbl[s] = 0; }
-U0 RetHookClr()       // disarm the verify-return hook + clear its bit
-{ U64 r = g_raster_ret; g_raster_ret = 0; HookClrAt(r); }
-U0 RasterVerifyRet()   // at the rasterizer's return: compare emulated z-buffer + collision vs the native run
+  return plotcnt;
+}
+#include "poly.HC"
+
+I64 PolyDone(I64 cnt) { reg[0] = cnt; rip = RdMem(reg[4], 8); reg[4] += 8 + 3 * 8; return 1; }   // GrFillPoly3 has 3 args (callee-pop)
+
+I64 GrPoly3HLE()        // fires at GrFillPoly3's prologue: fan-triangulate the convex poly + raster each tri natively
 {
-  I64 j, bad = 0, bod = 0;
-  // preemption guard: if an IRQ was DELIVERED between the native pass and this return, another task may
-  // have drawn into the span -> the comparison is meaningless -> DISCARD (don't count). irq_count is exact
-  // (the old icount-gap heuristic let task-switches inside its 20000-instr allowance count as "diffs",
-  // falsely rejecting good copies under the paced 60Hz loop -> n=1 -> the bimodal 19-vs-30fps Varoom runs).
-  if (irq_count != g_rv_irqc || icount - g_rv_icount > g_rv_cnt * 64 + 20000) { RetHookClr(); return; }
-  U64 body = *(U64 *)(mem + g_rv_dc + of_dc.body); I64 zbad = 0, zj = -1;
-  for (j = 0; j < g_rv_cnt; j++) { if (*(U32 *)(mem + g_rv_zbuf + (g_rv_idx + j * g_rv_step) * 4) != g_rv_natz[j]) { zbad++; if (zj < 0) zj = j; } if (mem[body + g_rv_idx + j * g_rv_step] != g_rv_natb[j]) bod++; }
-  bad = zbad;
-  if (*(U64 *)(mem + g_rv_dc + of_dc.collision_cnt) != g_rv_c1) bad++;				// collision pixel counter
-  if (*(U64 *)(mem + g_rv_dc + of_dc.nearest_dist) != g_rv_c2) bad++;			       // collision min-metric
-  if (bad && !g_dbg_badn) { g_dbg_badn = 1;                                       // forensics: snapshot the FIRST bad verify
-    g_dbg_bad[0] = zbad; g_dbg_bad[1] = bod; g_dbg_bad[2] = g_rv_cnt; g_dbg_bad[3] = g_rv_idx;
-    g_dbg_bad[4] = *(U32 *)(mem + g_rv_dc + of_dc.flags); g_dbg_bad[5] = *(U32 *)(mem + g_rv_dc + of_dc.color);
-    g_dbg_bad[6] = *(U64 *)(mem + g_rv_dc + of_dc.collision_cnt); g_dbg_bad[7] = g_rv_c1; g_dbg_bad[8] = *(U64 *)(mem + g_rv_dc + of_dc.nearest_dist); g_dbg_bad[9] = g_rv_c2;
-    if (zj >= 0) { g_dbg_bad[10] = *(U32 *)(mem + g_rv_zbuf + (g_rv_idx + zj * g_rv_step) * 4); g_dbg_bad[11] = g_rv_natz[zj]; g_dbg_bad[12] = zj; } }
-  g_raster_checks++;
-  if (bad) g_raster_diffs++;                                                      // geometry/gameplay mismatch (should be 0)
-  g_rv_bodydiff += bod;                                                           // total body-pixel diffs (dither)
-  RetHookClr();   // disarm + clear the hook bit (the next call re-arms; leaving the bit set would gate this hot caller-return rip to the interpreter forever)
+  U64 dc, poly, body, zbuf, rmat; I64 n, i, S = 12, ax, ay, az, bx, by, bz, cx, cy, cz,res=0;   // CD3I32 = {I32 x,y,z} = 12 bytes
+  dc = RdMem(reg[4] + 8, 8); n = RdMem(reg[4] + 0x10, 8); poly = RdMem(reg[4] + 0x18, 8);
+  body = *(U64 *)(mem + dc + of_dc.body); zbuf = *(U64 *)(mem + dc + of_dc.depth_buf);
+  U32 flags=*(U32 *)(mem+dc+of_dc.flags);
+  if (flags&0x600) return 0;
+  if ((flags&0x100) &&
+        RdMem(dc+of_dc.transform,8)!=g_dc_transform) return 0;
+  if (n < 3 || n > 64 || !body || !zbuf) return 0;                            // no z-buffer / odd n -> let the OS emulate
+  if (poly + n * S >= mem_size) return 0;
+  // We rasterize poly points as SCREEN coords. The real GrFillPoly3 first runs dc->transform on every
+  // point (Mat4x4 by dc->r + dc->x/y/z offset, or a custom projection). Only the identity case is truly
+  // screen-space (e.g. HolyCraft, which pre-projects and passes screen polys). If the DC carries a real
+  // transform (Castle Frankenstein's 3D walls set dc->transform=CFTransform + a rotation dc->r), fall
+  // back to the OS's GrFillPoly3 so it transforms first. CDC offsets are stable across builds:
+  // dc->x/y/z @0xD8/0xDC/0xE0 (I32), dc->r @0xC8 (-> 4x4 matrix; identity = 0x100000000 on the diagonal).
+  if (*(I32 *)(mem + dc + of_dc.x) || *(I32 *)(mem + dc + of_dc.y) || *(I32 *)(mem + dc + of_dc.z)) return 0;
+  rmat = *(U64 *)(mem + dc + of_dc.r); if (!rmat) return 0;
+  for (i = 0; i < 16; i++) {
+    if (i == 0 || i == 5 || i == 10 || i == 15) { if (*(I64 *)(mem + rmat + i * 8) != 0x100000000) return 0; }
+    else if (*(I64 *)(mem + rmat + i * 8)) return 0;
+  }
+  ax = *(I32 *)(mem + poly); ay = *(I32 *)(mem + poly + 4); az = *(I32 *)(mem + poly + 8);   // fan from poly[0]
+  for (i=1;i<n-1;i++) {
+    bx = *(I32 *)(mem + poly + i * S);     by = *(I32 *)(mem + poly + i * S + 4);     bz = *(I32 *)(mem + poly + i * S + 8);
+    cx = *(I32 *)(mem + poly + (i + 1) * S); cy = *(I32 *)(mem + poly + (i + 1) * S + 4); cz = *(I32 *)(mem + poly + (i + 1) * S + 8);
+    res+=PolyTri(dc,ax,ay,az,bx,by,bz,cx,cy,cz);
+  }
+  g_poly3_calls++;
+  return PolyDone(res);
+}
+
+I64 RasterHLE()
+{//The named guest primitives share one span filler.
+  U64 dc;
+  I64 vert,x1,x2,y,z1,z2,res;
+  if (g_poly3_hle && rip==g_poly3_hle)
+    return GrPoly3HLE;
+  if (g_raster_n!=2)
+    return 0;
+  if (rip==g_raster_hle[0])
+    vert=FALSE;
+  else if (rip==g_raster_hle[1])
+    vert=TRUE;
+  else
+    return 0;
+  dc=RdMem(reg[4]+8,8);
+  if (vert) {
+    y=RdMem(reg[4]+0x10,8);
+    x1=RdMem(reg[4]+0x18,8);
+    x2=RdMem(reg[4]+0x20,8);
+  } else {
+    x1=RdMem(reg[4]+0x10,8);
+    x2=RdMem(reg[4]+0x18,8);
+    y=RdMem(reg[4]+0x20,8);
+  }
+  z1=RdMem(reg[4]+0x28,8);
+  z2=RdMem(reg[4]+0x30,8);
+  res=SpanFill(dc,vert,x1,x2,y,z1,z2);
+  if (res<0)
+    return 0;
+  return RasterDone(res);
 }
 
 U0 Step()
@@ -1093,16 +985,13 @@ U0 Step()
 
   if (g_hooktbl[rip & 0xFFFF]) {                   // gate: only ~1.5% of rips need the four hook compares
     if (rip == g_ctr_rip && g_ctr_rip) g_ctr_n++;  // diag execution counter (0 = off)
-    if (g_raster_n || g_raster_cand) { I64 q; for (q = 0; q < g_raster_n; q++) if (rip == g_raster_hle[q]) { if (RasterHLE()) return; q = 99; }   // native span filler (all armed copies)
-      if (rip == g_raster_cand && g_raster_cand) { if (RasterHLE()) return; } }                                               // candidate under shadow-verify
-    if (g_poly3_hle && rip == g_poly3_hle) { if (RasterHLE()) return; }                                                        // native GrFillPoly3 (poly fill)
-    if (rip == g_raster_ret && g_raster_ret) RasterVerifyRet();            // shadow-verify: compare emulated vs native at the span filler's return
+    if (g_raster_n || g_poly3_hle)
+      if (RasterHLE) return;
     if (rip == g_hle_blit) { HleBlit(); return; }   // native fast-path for the dominant compositor blit
     if (rip == g_capture_rip) CaptureDesk();        // grab the finished frame (incl. native cursor) tear-free
     if (rip == g_skip_c4)  { rip = RdMem(reg[4], 8); reg[4] += 8 + 32; return; }  // skip DCBlotColor4 (4 args)
     if (rip == g_skip_vga) { rip = RdMem(reg[4], 8); reg[4] += 8;      return; }  // skip GrUpdateVGAGraphics
     if (rip == g_skip_xlat){ rip = RdMem(reg[4], 8); reg[4] += 8 + 32; return; }  // skip XLAT palette convert (4 args)
-    if (rip == g_skip_bg && g_game_running) { rip = RdMem(reg[4], 8); reg[4] += 8; return; }  // skip the hidden desktop redraw behind a fullscreen game
   }
   pfx66 = 0; repf = 0; hasRex = 0; rexW = 0; rexR = 0; rexX = 0; rexB = 0; g_segbase = 0; lockf = 0; op = mem[rip]; rip++;
   while (g_pfx[op]) {                                  // legacy prefixes (one table lookup, not 11 compares)
@@ -1269,14 +1158,25 @@ U0 Step()
 
 #include "guestcall.HC"               // host-injected guest calls (backend execution API); needs Step(), hooks into Run() below
 
-U0 RunTo(U64 target, I64 budget)       // run until rip==target (used to HLE-call a guest function)
-{
-  I64 lim = icount + budget;
-  while (icount < lim && rip != target && halted < 2) {
-    if (pit_div) { pit_counter--; if (pit_counter <= 0) { pit_counter = pit_div; pic1_irr |= 1; } }
-    hpet_ctr += 33; tsc += tsc_rate;
-    if (halted == 1) { if ((rfl & F_IF) && ((pic1_irr & ~pic1_mask) || (pic2_irr & ~pic2_mask))) { halted = 0; CheckIrq(); } icount++; continue; }
-    Step(); icount++; if ((rfl & F_IF) && ((pic1_irr & ~pic1_mask) || (pic2_irr & ~pic2_mask))) CheckIrq(); } }
+U0 RunTo(U64 target,I64 budget)
+{//Interpret until target, a fault, or budget instructions have run.
+  I64 lim=icount+budget;
+  while (icount<lim && rip!=target && halted<2) {
+    if (halted==1) {
+      if (rfl&F_IF &&
+            ((pic1_irr&~pic1_mask) || (pic2_irr&~pic2_mask))) {
+        halted=0;
+        CheckIrq;
+      }
+    } else
+      Step;
+    icount++;
+    TimeRun(1);
+    if (rfl&F_IF &&
+          ((pic1_irr&~pic1_mask) || (pic2_irr&~pic2_mask)))
+      CheckIrq;
+  }
+}
 // Call a guest function (no args) and run until it returns to a sentinel address.
 U0 CallGuest(U64 fn)
 { U64 sentinel = 0x7FF0; reg[4] -= 8; WrMem(reg[4], 8, sentinel); rip = fn; halted = 0; RunTo(sentinel, 80000000); }
@@ -1331,83 +1231,64 @@ I64 RunCore(I64 budget)
   return icount-start;
 }
 
-U0 Run(I64 maxi)                       // run until icount==maxi (or a fault halts us)
-{
-  while (icount < maxi) {
-    if (halted >= 2) break;                                         // bad opcode / fault: stop
-    if (halted == 1) {                                             // HLT: idle until an IRQ
-      // A pending host-injected guest call takes the idle HLT with IF=1 as its safe point (the idle
-      // task parked at STI;HLT): it runs to completion here and leaves the CPU HLT'd exactly as found.
-      if (g_gc_state == GC_PENDING && (rfl & F_IF)) { GuestCallRun(); continue; }
-      // Fast-forward the dead time: nothing but the PIT advances while halted, so jump straight to
-      // the next tick in ONE step instead of spinning millions of no-op iterations (huge fps win -
-      // the guest idles between WinMgr refreshes and that idle was costing ~all the wall-clock).
-      I64 skip = pit_div ? pit_counter : 1; if (skip < 1) skip = 1; if (skip > maxi - icount) skip = maxi - icount; if (skip < 1) skip = 1;
-      if (pit_div) { pit_counter -= skip; if (pit_counter <= 0) { pit_counter = pit_div; pic1_irr |= 1; } }
-      g_hpet_acc += g_hpet_q16 * skip; hpet_ctr += g_hpet_acc >> 16; g_hpet_acc &= 0xFFFF; g_tsc_acc  += g_tsc_q16  * skip; tsc      += g_tsc_acc  >> 16; g_tsc_acc  &= 0xFFFF; icount += skip;
-      if ((pic1_irr & ~pic1_mask) || (pic2_irr & ~pic2_mask)) {     // an IRQ is now pending
-        if (rfl & F_IF) { halted = 0; CheckIrq(); }                 // IF=1: wake + service it
-        else { irq_stall += skip; if (irq_stall > 800000000) { irq_stall = 0; halted = 0; CheckIrq(); } } }   // HLT-with-IF=0: the guest halted at a stable point (RSP valid), so a high-threshold wake is safe
-      continue; }
-    // Run a BATCH of instructions, then tick the devices once. Advancing PIT/TSC/HPET and checking
-    // IRQs on every single instruction was ~20% of the loop; the guest only needs ~us device
-    // granularity and pit_div (~45k instr/tick) dwarfs the batch, so batching is timing-transparent
-    // but removes that per-instruction overhead (a core speedup that lifts the whole desktop + games).
-    I64 b = 0;
-    // JIT dispatch (gated by g_jit_on=0 default -> zero overhead until a JIT host wires it up): a hot
-    // block compiled to native WASM runs in ONE __jit_run (b = its instr count). Until then, count the
-    // block's hotness and at the threshold ask the host to compile it. See JIT-DESIGN.md.
-    if (g_jit_on && !g_hooktbl[rip & 0xFFFF]) {         // hooked rips (HLE blit/skips/raster) stay interp'd so Step's hooks fire (the JIT would otherwise compile + bypass them)
-      I64 slot = (rip ^ (rip >> 16)) & 0xFFFF;
-      // run a CHAIN of JIT'd blocks natively (one host round-trip). Cap the chain to one PIT period so
-      // IRQ0 still fires on time -- otherwise a guest spin-wait on the timer never wakes (games freeze).
-      if (g_jit_rip[slot] == rip && g_jit_n[slot] > 0) { I64 cap = maxi - icount; if (pit_div > 0 && pit_counter > 0 && cap > pit_counter) cap = pit_counter;
-        if (((pic1_irr & ~pic1_mask) || (pic2_irr & ~pic2_mask)) && !(rfl & F_IF)) cap = -cap;   // IRQ pending but IF=0: NEGATIVE cap = break-on-IF -> the chain hands back at the guest's next STI/POPF/IRET (those end blocks flagged bit30) so the IRQ is delivered in the open window below - the JIT-side fix for CLI'd waits (GodSong) instead of the slow single-step escape
-        b = __jit_dispatch(cap); }
-      else { if (g_jit_rip[slot] != rip) { g_jit_rip[slot] = rip; g_jit_hot[slot] = 0; g_jit_n[slot] = -1; } if (g_jit_n[slot] < 0) { g_jit_hot[slot]++; if (g_jit_hot[slot] > 64) g_jit_n[slot] = __jit_compile(rip); } } }
-    if (!b) {                                                                 // not a JIT'd block: interpret a batch
-      I64 batch = 64; if (batch > maxi - icount) batch = maxi - icount;
-      if (g_jit_on) {                                                         // JIT on: interpret only until the NEXT rip is a JIT'd block, then
-        while (b < batch) {                                                   // hand straight back (else a blind 64-batch buries the JIT - most insns
-          Step(); b++; if (halted) break;                                     // after a chain break ARE JIT'd, so the batch was ~all the interp cost).
-          I64 s2 = (rip ^ (rip >> 16)) & 0xFFFF; if (g_jit_rip[s2] == rip && g_jit_n[s2] > 0) break; }
-      } else {
-        while (b < batch) { Step(); b++; if (halted) break; }                 // pure interpreter (deploy): fast fixed batch, zero added checks
-      } }
-    icount += b;                                                              // advance time for the batch/block (Q16: sub-tick exact)
-    g_hpet_acc += g_hpet_q16 * b; hpet_ctr += g_hpet_acc >> 16; g_hpet_acc &= 0xFFFF; g_tsc_acc  += g_tsc_q16  * b; tsc      += g_tsc_acc  >> 16; g_tsc_acc  &= 0xFFFF;
-    if (pit_div) { pit_counter -= b; if (pit_counter <= 0) { pit_counter += pit_div; pic1_irr |= 1; } }  // PIT -> IRQ0
-    if (halted) continue;                                                     // HLT/fault: let the outer loop handle it
-    if (g_gc_state == GC_PENDING && (rfl & F_IF)) GuestCallRun();             // host-injected guest call: deliver at the IRQ point (IF=1, instr boundary)
-    if ((rfl & F_IF) && ((pic1_irr & ~pic1_mask) || (pic2_irr & ~pic2_mask))) CheckIrq();
-    // IRQ0 pending+unmasked but IF=0: a possible stall. Two very different cases share this state and the
-    // old watchdog (force one IRQ when irq_stall crosses a threshold) handled them BOTH the same way --
-    // wrongly. A force-fire mid task-switch corrupted the saved frame (the scheduler transiently parks RSP
-    // in a CTask struct, so DoInt pushed the IRET frame over task fields -> ret to a bogus addr -> #UD); the
-    // GodSong PopUpForm spawn hit exactly that. Why the JIT and not the interp: the interp checks IRQs every
-    // step and so delivers during the guest's brief STI/POPF windows; the JIT toggles IF *inside* a compiled
-    // block and chains past those windows, so they're invisible here and the IRQ never lands -> stall.
-    // FIX: when stalled past a normal critical section, ESCAPE by single-step interpreting until the guest
-    // itself re-opens IF -- the interp catches that window at single-instruction granularity and CheckIrq
-    // then delivers with IF=1 (the safe, normal path: no mid-switch corruption). A true permanent deadlock
-    // (a CLI-spin on a lock; RSP is a valid stack there) never re-opens IF -> after a long guard we force
-    // one delivery as the genuine last resort. GodSong escapes in a few hundred steps; the desktop never trips.
-    else if ((pic1_irr & 1) && !(pic1_mask & 1)) { irq_stall += b;
-      if (irq_stall > 2000000) { irq_stall = 0; I64 g = 0;
-        while (g < 3000000 && halted < 2) {
-          Step(); icount++; g++;
-          g_hpet_acc += g_hpet_q16; hpet_ctr += g_hpet_acc >> 16; g_hpet_acc &= 0xFFFF; g_tsc_acc += g_tsc_q16; tsc += g_tsc_acc >> 16; g_tsc_acc &= 0xFFFF;
-          if (pit_div) { pit_counter--; if (pit_counter <= 0) { pit_counter += pit_div; pic1_irr |= 1; } }
-          if (halted) break;
-          if ((rfl & F_IF) && ((pic1_irr & ~pic1_mask) || (pic2_irr & ~pic2_mask))) { CheckIrq(); break; }   // IF re-opened: SAFE delivery
-          if (!((pic1_irr & 1) && !(pic1_mask & 1))) break; }                  // IRQ0 cleared/masked elsewhere: stall gone
-        if (g >= 3000000 && (pic1_irr & 1) && !(pic1_mask & 1)) CheckIrq(); } } // never re-opened IF: genuine deadlock, force it
-    else irq_stall = 0;
-  } }
+U0 Run(I64 maxi)
+{//Core zero runs the devices. Other cores cannot spend its budget.
+  I64 b,batch,cap,slot;
+  Bool pending;
+  while (icount<maxi && halted<2) {
+    pending=(pic1_irr&~pic1_mask) || (pic2_irr&~pic2_mask);
+    if (pending && rfl&F_IF) {
+      halted=0;
+      CheckIrq;
+    }
+    if (g_gc_state==GC_PENDING && rfl&F_IF)
+      GuestCallRun;
+    cap=MinI64(maxi-icount,TimeTickWait);
+    if (cap<=0)
+      break;
+    if (halted==1) {
+      time_idle+=cap;
+      icount+=cap;
+      TimeRun(cap);
+    } else {
+      b=0;
+      if (g_jit_on && !g_hooktbl[rip&0xFFFF]) {
+        slot=(rip^(rip>>16))&0xFFFF;
+        if (g_jit_rip[slot]==rip && g_jit_n[slot]>0) {
+          if (pending && !(rfl&F_IF))
+            cap=-cap;
+          b=__jit_dispatch(cap);
+        } else {
+          if (g_jit_rip[slot]!=rip) {
+            g_jit_rip[slot]=rip;
+            g_jit_hot[slot]=0;
+            g_jit_n[slot]=-1;
+          }
+          if (g_jit_n[slot]<0 && ++g_jit_hot[slot]>64)
+            g_jit_n[slot]=__jit_compile(rip);
+        }
+      }
+      if (!b) {
+        batch=MinI64(64,MinI64(maxi-icount,TimeTickWait));
+        while (b<batch) {
+          Step;
+          b++;
+          if (halted || (pending && rfl&F_IF))
+            break;
+          slot=(rip^(rip>>16))&0xFFFF;
+          if (g_jit_on && g_jit_rip[slot]==rip && g_jit_n[slot]>0)
+            break;
+        }
+      }
+      icount+=b;
+      TimeRun(b);
+    }
+  }
+}
 
 U0 Reset()
 {
-  I64 i; for (i = 0; i < 16; i++) reg[i] = 0; rip = 0; rfl = 0; halted = 0; icount = 0; g_badop = 0; reg[4] = 0x100000; cr0 = 0; cr2 = 0; cr3 = 0; cr4 = 0; cr8 = 0; g_cs = 0x08; g_ss = 0x10; idtr_base = 0; idtr_limit = 0; gdtr_base = 0; gdtr_limit = 0; tsc = 0;
+  I64 i; TimeRst; for (i = 0; i < 16; i++) reg[i] = 0; rip = 0; rfl = 0; halted = 0; icount = 0; g_badop = 0; reg[4] = 0x100000; cr0 = 0; cr2 = 0; cr3 = 0; cr4 = 0; cr8 = 0; g_cs = 0x08; g_ss = 0x10; idtr_base = 0; idtr_limit = 0; gdtr_base = 0; gdtr_limit = 0; tsc = 0;
   for (i = 0; i < 16; i++) { xmm_lo[i] = 0; xmm_hi[i] = 0; }
   pic1_base = 0; pic1_mask = 0xFF; pic1_irr = 0; pic1_isr = 0; pic1_initstep = 0; pic2_base = 0; pic2_mask = 0xFF; pic2_irr = 0; pic2_isr = 0; pic2_initstep = 0; pit_reload = 0; pit_div = 0; pit_counter = 0; pit_wlo = 1; }
 U0 Load(U8 *p, I64 n, U64 at) { I64 i; for (i = 0; i < n; i++) mem[at + i] = p[i]; rip = at; }

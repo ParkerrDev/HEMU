@@ -252,19 +252,19 @@ U64 GuestCallRet(U64 fun,U64 callee,I64 len)
   return 0;
 }
 
-#define DC_MEMBERS_NUM	22
+#define DC_MEMBERS_NUM	23
 #define TASK_MEMBERS_NUM	17
 
 class CGuestDC
 {//Offsets of the guest's CDC members HEMU reads, in dc_members's order.
   I64 width,width_internal,height,flags,color,bkcolor,dither_probability_u16,
 	r,x,y,z,cur_x,cur_y,collision_cnt,nearest_dist,min_x,max_x,min_y,max_y,
-	win_task,body,depth_buf;
+	win_task,body,depth_buf,transform;
 } of_dc;
 U8 *dc_members[DC_MEMBERS_NUM]={"width","width_internal","height",
 	"flags","color","bkcolor","dither_probability_u16","r","x","y","z",
 	"cur_x","cur_y","collision_cnt","nearest_dist","min_x","max_x","min_y",
-	"max_y","win_task","body","depth_buf"};
+	"max_y","win_task","body","depth_buf","transform"};
 
 class CGuestTask
 {//Offsets of the guest's CTask members HEMU reads, in task_members's order.

@@ -35,6 +35,7 @@ class CCpuState {
   I64 f_hasRex, f_rexW, f_rexR, f_rexX, f_rexB, f_pfx66, f_repf;   // prefix decode
   U64 f_g_segbase;                      // FS/GS base for the current instruction (0 = flat)
   I64 f_md, f_rg, f_rm, f_isMem; U64 f_ea;   // ModRM decode
+  I64 f_icount;	//Instructions this core has run.
 };
 CCpuState g_cpu_st[NCORES];
 #define reg        g_cpu_st[MyCore()].f_reg
@@ -63,6 +64,7 @@ CCpuState g_cpu_st[NCORES];
 #define rm         g_cpu_st[MyCore()].f_rm
 #define isMem      g_cpu_st[MyCore()].f_isMem
 #define ea         g_cpu_st[MyCore()].f_ea
+#define icount     g_cpu_st[MyCore()].f_icount
 #define xmm_lo     g_xmm_lo[MyCore()]   // SSE XMM regs per-core (arrays declared in cpu.HC); like x87, must not be shared across cores
 #define xmm_hi     g_xmm_hi[MyCore()]
 #define lockf      g_lockf[MyCore()]    // per-core: current instruction had a LOCK prefix (atomic RMW on shared mem)
