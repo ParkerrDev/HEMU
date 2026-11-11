@@ -25,7 +25,7 @@ I64 g_gc_argc, g_gc_state, g_gc_err, g_gc_budget, g_gc_steps, g_gc_calls, g_gc_s
 CCpuState g_gc_save;	//The interrupted core's state, put back after the call.
 U64 g_gc_xmm_lo[16],g_gc_xmm_hi[16];
 
-U0 GuestCallRun()                    // precondition: state PENDING, (rfl & F_IF), halted <= 1, core 0
+U0 GuestCallRun()		     // precondition: state PENDING, (rfl & F_IF), halted <= 1, core 0
 {
   I64 i;
   MemCpy(&g_gc_save,&g_cpu_st[MyCore()],sizeof(CCpuState));
@@ -34,7 +34,7 @@ U0 GuestCallRun()                    // precondition: state PENDING, (rfl & F_IF
   g_gc_savlock = lockf; g_gc_savbad = g_badop;
   g_gc_state = GC_RUNNING; g_gc_steps = 0;
   for (i = g_gc_argc - 1; i >= 0; i--) { reg[4] -= 8; WrMem(reg[4], 8, g_gc_args[i]); }   // HolyC: args pushed right to left, callee pops
-  reg[4] -= 8; WrMem(reg[4], 8, g_gc_sentinel);                                            // return address = sentinel (HLT byte in scratch)
+  reg[4] -= 8; WrMem(reg[4], 8, g_gc_sentinel); 					   // return address = sentinel (HLT byte in scratch)
   rip = g_gc_fn; rfl &= ~F_IF; halted = 0;
   while (rip != g_gc_sentinel && g_gc_steps < g_gc_budget && halted == 0) { Step(); g_gc_steps++; }
   if (rip == g_gc_sentinel) { g_gc_res = reg[0]; g_gc_err = 0; g_gc_state = GC_DONE; }
@@ -48,7 +48,7 @@ U0 GuestCallRun()                    // precondition: state PENDING, (rfl & F_IF
   g_gc_calls++;
 }
 
-I64 GuestCallTry()                   // run the pending call now if this is a safe point; returns the state
+I64 GuestCallTry()		     // run the pending call now if this is a safe point; returns the state
 {
   if (g_gc_state != GC_PENDING || MyCore()) return g_gc_state;
   if (halted >= 2 || !(rfl & F_IF)) return g_gc_state;
@@ -72,11 +72,11 @@ I64 GuestCallPost(U64 fn, I64 argc, U64 argaddr, I64 budget)
 I64 GuestCallState() { return g_gc_state; }
 U64 GuestCallRes()   { return g_gc_res; }
 I64 GuestCallAck()   { if (g_gc_state == GC_DONE || g_gc_state == GC_FAILED) g_gc_state = GC_IDLE; return g_gc_state; }   // host consumed the result
-U64 GuestInfo(I64 which)             // read-only probes for the host (no globals map needed for a prebuilt .wasm)
+U64 GuestInfo(I64 which)	     // read-only probes for the host (no globals map needed for a prebuilt .wasm)
 {
   switch (which) {
     case 0:  return mem_size;
-    case 1:  return RAM_SIZE;        // scratch window base = first byte above the OS's RAM
+    case 1:  return RAM_SIZE;	     // scratch window base = first byte above the OS's RAM
     case 2:  return SCR_SIZE;
     case 3:  return msr_fsbase;      // Fs = current task
     case 4:  return msr_gsbase;      // Gs = CCPU
@@ -94,4 +94,21 @@ U64 GuestInfo(I64 which)             // read-only probes for the host (no global
     case 16: return GuestU64(guest.jiffies);
   }
   return 0;
+}
+
+I64 GuestPatchJump(U64 addr,U64 target)
+{//Keep PUSH RBP/MOV RBP,RSP intact for suspended task entry contexts.
+//The host holds the all-core barrier; replace one 7-byte SUB RSP only.
+  I64 i;
+  if (!addr || addr+11>RAM_SIZE || addr+11>mem_size || !target ||
+	target+11>RAM_SIZE || target+11>mem_size ||
+	GuestU32(addr)!=0xEC8B4855 || GuestU32(target)!=0xEC8B4855 ||
+	GuestU32(addr+4)&0xFFFFFF!=0xEC8148 ||
+	GuestU32(target+4)&0xFFFFFF!=0xEC8148)
+    return -1;
+  for (i=0;i<MaxI64(g_ncore,1);i++)
+    if (addr+4<=g_cpu_st[i].f_rip<addr+11) return 0;
+  mem[addr+4]=0xE9;
+  WrMem(addr+5,4,target-addr-5);
+  return 1;
 }
