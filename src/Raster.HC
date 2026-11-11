@@ -42,8 +42,8 @@ I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
 	pix_lo_c=of_task.pix_top,pix_hi_c=of_task.pix_bottom,
 	cur_a=of_dc.cur_x,cur_c=of_dc.cur_y,
 	cnt,cx,cy,dist,dx,dy,wzn=0,cov_row=0,cov_step=1;
-  Bool dither=FALSE,probability_dither=FALSE,need_cov,char_clear=TRUE,
-	draw;
+  I32 *depth;
+  Bool dither=FALSE,probability_dither=FALSE,need_cov,char_clear=TRUE;
   if (!zbuf) return -1;
   if (vert) {
     size_a=height;size_c=width;pix_step=stride;
@@ -152,18 +152,19 @@ I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
   for (i=x1;i<=x2;i++) {
     if (char_clear) {
       cur_z=zacc>>32;
-      draw=TRUE;
-      if (cur_z<0 || cur_z>*(mem+zptr)(I32 *)) draw=FALSE;
-      else *(mem+zptr)(I32 *)=cur_z;
-      if (draw) {
-	color=cw&0xFF;mode=cw>>8&0xFF;
-	if (mode==ROPB_XOR) mem[body+idx]^=color;
-	else if (mode==ROPB_COLLISION) {
-	  color=mem[body+idx];
-	  if (color!=TRANSPARENT && color!=bg)
-	    (*(mem+dc+of_dc.collision_cnt)(U64 *))++;
-	} else mem[body+idx]=color;
-	res++;
+      if (cur_z>=0) {
+	depth=(mem+zptr)(I32 *);
+	if (cur_z<=*depth) {
+	  *depth=cur_z;
+	  color=cw&0xFF;mode=cw>>8&0xFF;
+	  if (mode==ROPB_XOR) mem[body+idx]^=color;
+	  else if (mode==ROPB_COLLISION) {
+	    color=mem[body+idx];
+	    if (color!=TRANSPARENT && color!=bg)
+	      (*(mem+dc+of_dc.collision_cnt)(U64 *))++;
+	  } else mem[body+idx]=color;
+	  res++;
+	}
       }
     }
     if (dither) {

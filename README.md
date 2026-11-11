@@ -52,8 +52,11 @@ host supplies serialized atomics and headless callbacks; it is not a native
 desktop, disk or JIT implementation.
 Original QEMU/KVM also supplies 200 raster cases: native and accelerated line/
 triangle pixels, depth, collision counts, extents, nearest distance and final
-random seeds agree. These are bounded checks, not complete x86 or graphics
-coverage. Divide faults enter the guest's #DE handler for valid ring-zero,
+random seeds agree. A further 30 native cases cover line pixels/depth overlapping
+the task seed, dither probability and each other. Controlled shared-memory
+checks also force another worker to change those fields between random draws;
+per-draw state remains observable. These are bounded checks, not complete x86
+or graphics coverage. Divide faults enter the guest's #DE handler for valid ring-zero,
 long-mode, IST-zero interrupt/trap gates targeting the current code segment.
 Original QEMU/KVM supplies 1,536 raw entry frames and native `DivZero` catch
 behavior; interpreter/JIT checks preserve the faulting prefix RIP, operands,
