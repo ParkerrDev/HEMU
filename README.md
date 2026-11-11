@@ -129,6 +129,15 @@ contention tests and an independent x86-64 hardware oracle cover arithmetic,
 defined flags and register writeback; logical operations set undefined AF to
 zero consistently in both interpreter and JIT.
 
+Unlocked CMPXCHG and CMPXCHG8B write the old memory operand back when the
+comparison fails. This write cycle is observable at device endpoints even when
+RAM bytes stay equal. Failed register-destination CMPXCHG preserves the upper
+register bits, including a 32-bit destination; it must not take that memory
+writeback path. Physical read-only-page faults and an original QEMU/KVM APIC
+resend witness establish the distinction independently of HEMU. The device
+checks retain the existing saved-guest MMIO model rather than claiming full
+hardware APIC behavior or newly implemented memory-protection faults.
+
 CMPXCHG16B supports complete, 16-byte-aligned RAM operands and the RAM alias.
 It compares RDX:RAX, stores RCX:RBX on success, loads the old pair on failure,
 and changes only ZF. Both halves receive a write cycle even on failure. A

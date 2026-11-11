@@ -248,6 +248,7 @@ U0 RmCmpXchg(I64 size)
   } else {
     old=RdRM(size);
     if (expected==old) WrRM(size,arg);
+    else if (isMem) WrRM(size,old);
   }
   SetSub(expected,old,expected-old,size);
   if (expected!=old) WrReg(0,size,old);
@@ -267,6 +268,7 @@ U0 RmCmpXchg8B()
   } else {
     old=RdRM(8);
     if (old==expected) WrRM(8,arg);
+    else WrRM(8,old);
   }
   rfl&=~F_ZF;
   if (old==expected) rfl|=F_ZF;
