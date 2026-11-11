@@ -322,6 +322,13 @@ U0 Cpuid()  // enough feature bits for TempleOS: FPU/TSC/MSR/PAE/APIC/MMX/FXSR/S
 // VGA DAC state. Palette reads are used by TOOM's 256-color to 16-color dithering.
 U8 vga_dac[768];
 I64 vga_read_pos,vga_write_pos;
+U0 VgaPaletteSend(I64 i)
+{//All hosts receive the same eight-bit RGB palette on boot and restore.
+  I64 r=vga_dac[i*3]*255/63,g=vga_dac[i*3+1]*255/63,
+	b=vga_dac[i*3+2]*255/63;
+  __host_palette(i,r*0x10000+g*0x100+b);
+}
+
 U0 VgaPaletteInit()
 {
   I64 i,r,g,b,bright;
@@ -330,7 +337,7 @@ U0 VgaPaletteInit()
     r=((i&4)!=0)*42+bright*21;g=((i&2)!=0)*42+bright*21;b=((i&1)!=0)*42+bright*21;
     if(i==6)g=21;
     vga_dac[i*3]=r;vga_dac[i*3+1]=g;vga_dac[i*3+2]=b;
-    __host_palette(i,((r*255/63)<<16)|((g*255/63)<<8)|(b*255/63));
+    VgaPaletteSend(i);
   }
   vga_read_pos=0;vga_write_pos=0;
 }
@@ -369,7 +376,7 @@ U0 IoOut(U64 port, U64 v)
   if(port==0x3C7){vga_read_pos=(v&255)*3;return;}
   if(port==0x3C8){vga_write_pos=(v&255)*3;return;}
   if(port==0x3C9){i=vga_write_pos/3;vga_dac[vga_write_pos]=v&63;vga_write_pos=(vga_write_pos+1)%768;
-    if(vga_write_pos%3==0 && i<16)__host_palette(i,((vga_dac[i*3]*255/63)<<16)|((vga_dac[i*3+1]*255/63)<<8)|(vga_dac[i*3+2]*255/63));return;}
+    if(vga_write_pos%3==0 && i<16)VgaPaletteSend(i);return;}
   if (port >= 0x3B0 && port <= 0x3DF) return;          // VGA registers - framebuffer is HLE'd, ignore (skip the chain)
   if (port == 0x1F0 || port == 0x170) {                // ATA data port WRITE (16-bit words during a WRITE command)
     if (ata_wr && ata_words > 0) { *(U16 *)(ata_buf + ata_pos) = v; ata_pos += 2; ata_words--;
@@ -626,19 +633,19 @@ U0 OpX87(U64 op)
     else if (sub == 1) { a = FStv(0); FStset(0, FStv(sti)); FStset(sti, a); }  // FXCH
     else if (sub == 4) { if (sti == 0) FStset(0, -FStv(0)); else if (sti == 1) { a = FStv(0); if (a < 0) FStset(0, -a); } else if (sti == 4) { x87_sw &= ~0x0200; FCmpSW(FStv(0), 0.0); } }  // FCHS/FABS/FTST (Sign uses FTST + FNSTSW)
     else if (sub == 5) {                                             // FLD1/FLDL2T/FLDL2E/FLDPI/FLDLG2/FLDLN2/FLDZ
-      if (sti == 0) FPush(1.0); else if (sti == 1) FPush(3.32192809488736235); else if (sti == 2) FPush(1.44269504088896341); else if (sti == 3) FPush(3.14159265358979324); else if (sti == 4) FPush(0.30102999566398120); else if (sti == 5) FPush(0.69314718055994531); else if (sti == 6) FPush(0.0); }
+      if (sti == 0) FPush(1.0); else if (sti == 1) FPush(BitsToF64(0x400A934F0979A371)); else if (sti == 2) FPush(BitsToF64(0x3FF71547652B82FE)); else if (sti == 3) FPush(BitsToF64(0x400921FB54442D18)); else if (sti == 4) FPush(BitsToF64(0x3FD34413509F79FF)); else if (sti == 5) FPush(BitsToF64(0x3FE62E42FEFA39EF)); else if (sti == 6) FPush(0.0); }
     else if (sub == 6) {                                             // F2XM1/FYL2X/FPTAN/FPATAN/FXTRACT/FDECSTP/FINCSTP
       if (sti == 0) FStset(0, Pow(2.0, FStv(0)) - 1.0);                                      // F2XM1: 2^ST0 - 1
-      else if (sti == 1) { r = FStv(1) * Ln(FStv(0)) * 1.44269504088896341; FPopv(); FStset(0, r); }  // FYL2X: ST1*=log2(ST0), pop
+      else if (sti == 1) { r = FStv(1) * Ln(FStv(0)) * BitsToF64(0x3FF71547652B82FE); FPopv(); FStset(0, r); }  // FYL2X: ST1*=log2(ST0), pop
       else if (sti == 2) { FStset(0, Tan(FStv(0))); FPush(1.0); }                            // FPTAN: ST0=tan, push 1.0
       else if (sti == 3) { r = ATan2(FStv(1), FStv(0)); FPopv(); FStset(0, r); }             // FPATAN: ST1=atan2(ST1,ST0), pop
-      else if (sti == 4) { a = FStv(0); if (a == 0.0) { FStset(0, 0.0); FPush(0.0); } else { b = a; if (b < 0) b = -b; bcd_i = F64ToInt(Ln(b) * 1.44269504088896341); if (IntToF64(bcd_i) > Ln(b) * 1.44269504088896341) bcd_i--; FStset(0, IntToF64(bcd_i)); FPush(a / Pow(2.0, IntToF64(bcd_i))); } }  // FXTRACT
+      else if (sti == 4) { a = FStv(0); if (a == 0.0) { FStset(0, 0.0); FPush(0.0); } else { b = a; if (b < 0) b = -b; bcd_i = F64ToInt(Ln(b) * BitsToF64(0x3FF71547652B82FE)); if (IntToF64(bcd_i) > Ln(b) * BitsToF64(0x3FF71547652B82FE)) bcd_i--; FStset(0, IntToF64(bcd_i)); FPush(a / Pow(2.0, IntToF64(bcd_i))); } }  // FXTRACT
       else if (sti == 6) fsp = (fsp - 1) & 7;                                                  // FDECSTP
       else if (sti == 7) fsp = (fsp + 1) & 7;                                                  // FINCSTP
     }
     else if (sub == 7) {                                            // FPREM/FYL2XP1/FSQRT/FSINCOS/FRNDINT/FSCALE/FSIN/FCOS
       if (sti == 0) { a = FStv(0); b = FStv(1); FStset(0, a - IntToF64(F64ToInt(a / b)) * b); }  // FPREM: ST0 %= ST1
-      else if (sti == 1) { r = FStv(1) * Ln(FStv(0) + 1.0) * 1.44269504088896341; FPopv(); FStset(0, r); }  // FYL2XP1
+      else if (sti == 1) { r = FStv(1) * Ln(FStv(0) + 1.0) * BitsToF64(0x3FF71547652B82FE); FPopv(); FStset(0, r); }  // FYL2XP1
       else if (sti == 2) FStset(0, SqrtF64(FStv(0)));                                          // FSQRT
       else if (sti == 3) { a = FStv(0); FStset(0, Sin(a)); FPush(Cos(a)); }                // FSINCOS
       else if (sti == 4) FStset(0,FIntRound(FStv(0),(x87_cw>>10)&3));                                 // FRNDINT

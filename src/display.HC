@@ -29,7 +29,7 @@ Bool WinRateFind()
   if (!start || start+4096>=mem_size) return FALSE;
   for (a=start;a<start+4096;a++)
     if (GuestU64(a)==0x667432253A535046 ||
-	  (GuestU64(a)&0x00FFFFFFFFFFFFFF)==0x66743325535046) {
+	  GuestU64(a)&0x00FFFFFFFFFFFFFF==0x66743325535046) {
       fmt=a;
       nf++;
       patched=mem[a+3]=='%';
@@ -51,10 +51,11 @@ Bool WinRateFind()
   for (i=0;i<3;i++) win_rate_old[i]=GuestU64(pool+i*8);
   win_rate_old[3]=GuestU64(clamp);
   if (patched) {
-    win_rate_old[0]=F64ToBits(0.010000000000000002);
-    win_rate_old[1]=F64ToBits(1001/240000.0);
-    win_rate_old[2]=F64ToBits(1001/30000.0);
-    win_rate_old[3]=F64ToBits(99.0);
+    //The V5.03 constant pool, including its native decimal rounding.
+    win_rate_old[0]=0x3F847AE147AE147C;
+    win_rate_old[1]=0x3F71156F8C384072;
+    win_rate_old[2]=0x3FA1156F8C384072;
+    win_rate_old[3]=0x4058C00000000000;
   }
   return TRUE;
 }

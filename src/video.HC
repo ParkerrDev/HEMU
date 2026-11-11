@@ -8,7 +8,7 @@ U0 VideoTablesInit()
   I64 i,j;
   for (i=0;i<256;i++)
     for (j=0;j<8;j++)
-      video_spread[i]|=(i>>j&1)<<j*8;
+      video_spread[i]|=(i>>j&1)<<(j*8);
   video_ready=TRUE;
 }
 
@@ -22,7 +22,8 @@ U0 VideoBlot4(U64 dst,U64 src,U64 cache,I64 cnt)
       WrMem(cache+i*8,8,v);
       for (p=0;p<4;p++) {
 	b=v>>p&0x0101010101010101;
-	mem[dst+p*cnt+i]=b*0x0102040810204080>>56;
+	b*=0x0102040810204080;
+	mem[dst+p*cnt+i]=b>>56;
       }
     }
   }
@@ -32,15 +33,16 @@ U0 VideoLine(U64 vga_arg,U64 src_arg,I64 cnt,U64 dst_arg,Bool flush)
 {//The line writer also maintains the OS's screen image and pointers.
   U64 vga=GuestU64(vga_arg),src=GuestU64(src_arg),
 	dst=GuestU64(dst_arg),table=GuestU64(video_reverse),v,b;
-  I64 i,j,k;
+  I64 i,j,k,shift;
   for (i=0;i<cnt;i++) {
     v=GuestU64(src+i*8);
     if (flush || v!=GuestU64(dst+i*8)) {
       WrMem(dst+i*8,8,v);
       b=0;
       for (j=0;j<8;j++) {
-	k=v>>j*8&255;
-	b|=mem[table+k]<<j*8;
+	shift=j*8;
+	k=v>>shift&255;
+	b|=mem[table+k]<<shift;
       }
       WrMem(vga+i*8,8,b);
     }
@@ -71,8 +73,11 @@ Bool VideoHLE()
     reg[0]=v;
     reg[3]=d+cnt*8;
     reg[2]=v;
-    if (changed)
-      reg[2]=(v>>3&0x0101010101010101)*0x0102040810204080>>56;
+    if (changed) {
+      reg[2]=v>>3&0x0101010101010101;
+      reg[2]*=0x0102040810204080;
+      reg[2]>>=56;
+    }
     reg[8]=a+cnt*2;
     reg[9]=a+cnt*3;
   } else if (video_line && (rip==video_line || rip==video_flush)) {

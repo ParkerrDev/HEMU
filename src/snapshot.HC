@@ -174,8 +174,7 @@ U0 SnapshotResume()
   }
   VideoHookArm;
   for (i=0;i<16;i++)
-    __host_palette(i,vga_dac[i*3]*255/63<<16|
-	  vga_dac[i*3+1]*255/63<<8|vga_dac[i*3+2]*255/63);
+    VgaPaletteSend(i);
   UpdateSpk;
   g_present_seq=g_desk_seq-1;
   Present;
