@@ -39,11 +39,11 @@ U0 Frame()
   I64 mx = __host_msx(), my = __host_msy(), mb = __host_msb();
   if (mx < 0) mx = 0; else if (mx > 639) mx = 639; if (my < 0) my = 0; else if (my > 479) my = 479;
   if (g_names_ok) {//DrawMs draws at pos, windows and menus use pos_text.
-    *(I64 *)(mem+guest.ms_pos+of_d3.x)=mx;
-    *(I64 *)(mem+guest.ms_pos+of_d3.y)=my;
-    *(I64 *)(mem+guest.ms_pos+of_d3.z)=__host_wheel;
-    *(I64 *)(mem+guest.ms_pos_text+of_d3.x)=mx/8;
-    *(I64 *)(mem+guest.ms_pos_text+of_d3.y)=my/8;
+    *(mem+guest.ms_pos+of_d3.x)(I64*)=mx;
+    *(mem+guest.ms_pos+of_d3.y)(I64*)=my;
+    *(mem+guest.ms_pos+of_d3.z)(I64*)=__host_wheel;
+    *(mem+guest.ms_pos_text+of_d3.x)(I64*)=mx/8;
+    *(mem+guest.ms_pos_text+of_d3.y)(I64*)=my/8;
     mem[guest.ms_lb]=mb&1;
     mem[guest.ms_rb]=mb>>1&1;
   }
@@ -139,7 +139,7 @@ U0 HemuInit()			       // once: guest RAM, the snapshot, registers, HLE hooks, t
     hpet_freq=GuestU64(GuestVarMember("cnts","CCntsGlbls","HPET_freq"));
     //The old RAM snapshots omit device registers. Resume their last
     //display time, so outstanding tS deadlines remain in the same epoch.
-    F64 resume_tS=*(F64 *)(mem+guest.winmgr_last_refresh_tS);
+    F64 resume_tS=*(mem+guest.winmgr_last_refresh_tS)(F64*);
     I64 resume_ns=resume_tS*NS_SEC,resume_ticks=resume_tS*hpet_freq;
     tsc=resume_ns;
     hpet_ctr=GuestU64(GuestVarMember("cnts","CCntsGlbls","HPET_initial"))+

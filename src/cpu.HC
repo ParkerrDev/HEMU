@@ -4,17 +4,10 @@
 U8 *mem;                            // guest RAM (MAlloc'd so the snapshot can use 100s of MB)
 U64 mem_size;                       // bytes of guest RAM; anything >= this is MMIO (LAPIC/HPET/IOAPIC)
 U8 g_pfx[256];                       // prefix-byte lookup (1 = legacy prefix) - skips an 11-way compare per instr
-U0 InitMem(U64 sz)
-{
-  I64 i;
-  mem = MAlloc(sz + 16); mem_size = sz;                       // +16 pad absorbs boundary-spanning reads
-  for (i = 0; i < 256; i++) g_pfx[i] = 0; g_pfx[0x66] = 1; g_pfx[0x67] = 1; g_pfx[0xF0] = 1; g_pfx[0xF2] = 1; g_pfx[0xF3] = 1; g_pfx[0x2E] = 1; g_pfx[0x36] = 1; g_pfx[0x3E] = 1; g_pfx[0x26] = 1; g_pfx[0x64] = 1; g_pfx[0x65] = 1; g_desk = MAlloc(307200);
-  ata_buf = MAlloc(131072);                                  // 256 sectors * 512 B: ATA PIO read staging
-}
 #include "sym.HC" //HEMU finds what it needs in the guest by name.
 
 // PER-CORE state (reg/rip/rfl/halted/irq_stall/fpu/seg/decode/icount) lives in CCpuState g_cpu_st[] - defined
-// in core.HC (included above), accessed through #define reg CST.f_reg etc. (CST = this instance's MyCore()
+// in core.HC (included above), accessed through #define reg CST.f_reg etc. (CST = this instance's MyCore
 // slot). SHARED state (mem, devices, JIT cache, clocks, cr*, idtr/gdtr) stays below.
 U64 g_hle_blit;                      // entry addr of the transparent compositor blit to run natively (0=off)
 U8 *g_desk;                          // last COMPLETE frame (desktop + the OS's own cursor), captured tear-free
@@ -72,58 +65,26 @@ U0 UpdateSpk()
 #define F_DF 0x0400
 #define F_OF 0x0800
 
-//---------------------------------------------------------------- MMIO (LAPIC / HPET)
-// TempleOS reaches the LAPIC and HPET through an "uncached alias" whose base we
-// don't know a priori, so we identify a device by the low 12 bits of the address
-// (the register offset within its 4 KiB page). The pairs that matter for a live
-// single-CPU desktop: LAPIC EOI (0xB0, write -> ignore), LAPIC ID (0x20),
-// SVR (0xF0), and a monotonic HPET main counter (offset 0xF0/0xF8 on its page).
-U64 MmioRd(U64 a, I64 sz)
-{
-  U64 off; off = a & 0xFFF;
-  if (off == 0x20)  return MyCore() << 24;    // LAPIC APIC_ID register (id in bits 24-31) -> THIS core
-  if (off == 0x30)  return 0x50014;           // LAPIC version
-  if (off == 0xF0)  return hpet_ctr;          // HPET main counter (lo) - also LAPIC SVR read
-  if (off == 0xF4 || off == 0xF8) return hpet_ctr >> 32;  // HPET main counter (hi)
-  return 0; }
-U0 MmioWr(U64 a, I64 sz, U64 v)
-{
-  // SMP: the runtime inter-processor wakeup. TempleOS's MPInt writes ICR_HIGH (dest apic_id<<24)
-  // then ICR_LOW (delivery mode + vector) to send a directed fixed IPI (I_WAKE) to an idle AP.
-  U64 off; off = a & 0xFFF;
-  if (off == 0x310) { g_icr_high[MyCore()] = v; return; }   // ICR_HIGH: destination
-  if (off == 0x300) {                                        // ICR_LOW: fire
-    I64 dest = g_icr_high[MyCore()] >> 24;                   // dest apic_id (== core slot)
-    I64 dm = (v >> 8) & 7;                                   // delivery mode (0=fixed)
-    if (dm == 0 && dest >= 0 && dest < g_ncore && dest != MyCore())
-      __a_xchg64(&g_ipi_pending[dest], (v & 0xFF) | 0x100); // mark this AP's pending wake-vector (|0x100). ATOMIC (seq-cst): publishes the sender's prior task-state writes to the woken AP (x86-TSO ordering across real cores)
-    return; }
-  // other LAPIC EOI / config writes: acknowledged, no state to keep.
+U0 InitMem(U64 sz)
+{//Boundary-spanning reads use padding beyond the guest's RAM limit.
+  I64 i;
+  mem=MAlloc(sz+16);
+  mem_size=sz;
+  for (i=0;i<256;i++)
+    g_pfx[i]=0;
+  g_pfx[0x66]=1;g_pfx[0x67]=1;g_pfx[0xF0]=1;
+  g_pfx[0xF2]=1;g_pfx[0xF3]=1;g_pfx[0x2E]=1;
+  g_pfx[0x36]=1;g_pfx[0x3E]=1;g_pfx[0x26]=1;
+  g_pfx[0x64]=1;g_pfx[0x65]=1;
+  g_desk=MAlloc(640*480);
+  ata_buf=MAlloc(256*512);
 }
 
-//---------------------------------------------------------------- guest memory
-// WASM loads/stores are little-endian + unaligned-safe, matching x86 - so a
-// pointer-cast deref is one host load instead of a byte loop. Accesses at/above
-// mem_size are device MMIO, routed away from the RAM buffer so they never trap.
-// TempleOS also maps an UNCACHED ALIAS of all RAM at virtual 2^40 + phys (for
-// cache-bypassing access to shared structures like task message queues); strip
-// that bit so aliased RAM access hits real RAM instead of being dropped as MMIO.
-U64 RdMem(U64 a, I64 sz)
-{
-  if (a >= mem_size) { a &= 0xFFFFFFFFFF; if (a >= mem_size) return MmioRd(a, sz); }
-  if (sz == 8) return *(U64 *)(mem + a); if (sz == 4) return *(U32 *)(mem + a); if (sz == 2) return *(U16 *)(mem + a);
-  return mem[a]; }
-U0 WrMem(U64 a, I64 sz, U64 v)
-{
-  if (a >= mem_size) { a &= 0xFFFFFFFFFF; if (a >= mem_size) { MmioWr(a, sz, v); return; } }
-  if (sz == 8) { *(U64 *)(mem + a) = v; return; }
-  if (sz == 4) { *(U32 *)(mem + a) = v; return; }
-  if (sz == 2) { *(U16 *)(mem + a) = v; return; }
-  mem[a] = v; }
+#include "Mem"
 
 //---------------------------------------------------------------- fetch / imm
 U64 Fetch8()  { U64 b = mem[rip]; rip++; return b; }
-U64 Fetch32() { U64 v = *(U32 *)(mem + rip); rip += 4; return v; }   // rip is always code in RAM - skip RdMem's MMIO check
+U64 Fetch32() { U64 v = *(mem + rip)(U32*); rip += 4; return v; }   // rip is always code in RAM - skip RdMem's MMIO check
 U64 Fetch64() { U64 v = RdMem(rip, 8); rip += 8; return v; }
 I64 SignExt8(U64 b)  { b &= 0xFF;       if (b & 0x80)       return b - 0x100;       return b; }
 I64 SignExt32(U64 v) { v &= 0xFFFFFFFF; if (v & 0x80000000) return v - 0x100000000; return v; }
@@ -233,10 +194,10 @@ U0 DoStr(I64 op, I64 sz)
     n = reg[1]; total = n * sz;
     if (op == 0xA4 || op == 0xA5) {                                   // REP MOVS: copy RSI -> RDI
       U64 s = reg[6], dt = reg[7];
-      if (s + total <= mem_size && dt + total <= mem_size) { if (sz == 8) for (i = 0; i < n; i++) *(U64 *)(mem + dt + i * 8) = *(U64 *)(mem + s + i * 8); else         for (i = 0; i < total; i++) mem[dt + i] = mem[s + i]; reg[6] = s + total; reg[7] = dt + total; reg[1] = 0; return; }
+      if (s + total <= mem_size && dt + total <= mem_size) { if (sz == 8) for (i = 0; i < n; i++) *(mem + dt + i * 8)(U64*) = *(mem + s + i * 8)(U64*); else         for (i = 0; i < total; i++) mem[dt + i] = mem[s + i]; reg[6] = s + total; reg[7] = dt + total; reg[1] = 0; return; }
     } else if (op == 0xAA || op == 0xAB) {                            // REP STOS: fill RDI with AL/AX/EAX/RAX
       U64 dt = reg[7], val = RdReg(0, sz);
-      if (dt + total <= mem_size) { if      (sz == 8) for (i = 0; i < n; i++) *(U64 *)(mem + dt + i * 8) = val; else if (sz == 1) for (i = 0; i < total; i++) mem[dt + i] = val; else              for (i = 0; i < n; i++) WrMem(dt + i * sz, sz, val); reg[7] = dt + total; reg[1] = 0; return; } } }
+      if (dt + total <= mem_size) { if      (sz == 8) for (i = 0; i < n; i++) *(mem + dt + i * 8)(U64*) = val; else if (sz == 1) for (i = 0; i < total; i++) mem[dt + i] = val; else              for (i = 0; i < n; i++) WrMem(dt + i * sz, sz, val); reg[7] = dt + total; reg[1] = 0; return; } } }
   while (reg[1] != 0) {
     StrStep(op, sz); reg[1]--;
     if (cmpkind) {                                    // REPE(repf=1): stop when ZF=0; REPNE(repf=2): stop when ZF=1
@@ -308,7 +269,7 @@ U64 IoIn(U64 port)
     return st; }
   if (port == 0x1F7 || port == 0x177) return ata_words > 0 ? 0x48 : 0x40;   // ATA status: DRDY (+DRQ while data left)
   if (port == 0x1F0 || port == 0x170) {                                     // ATA data: serve staged sector words
-    if (ata_words > 0) { U64 w = *(U16 *)(ata_buf + ata_pos); ata_pos += 2; ata_words--; return w; }
+    if (ata_words > 0) { U64 w = *(ata_buf + ata_pos)(U16*); ata_pos += 2; ata_words--; return w; }
     return 0; }
   return 0; }
 U0 IoOut(U64 port, U64 v)
@@ -320,7 +281,7 @@ U0 IoOut(U64 port, U64 v)
     if(vga_write_pos%3==0 && i<16)VgaPaletteSend(i);return;}
   if (port >= 0x3B0 && port <= 0x3DF) return;          // VGA registers - framebuffer is HLE'd, ignore (skip the chain)
   if (port == 0x1F0 || port == 0x170) {                // ATA data port WRITE (16-bit words during a WRITE command)
-    if (ata_wr && ata_words > 0) { *(U16 *)(ata_buf + ata_pos) = v; ata_pos += 2; ata_words--;
+    if (ata_wr && ata_words > 0) { *(ata_buf + ata_pos)(U16*) = v; ata_pos += 2; ata_words--;
       if (ata_words == 0) { __host_disk_wr(ata_wlba, ata_wcnt, ata_buf); ata_wr = 0; } }   // commit to the host overlay
     return; }
   v &= 0xFF;
@@ -639,12 +600,12 @@ I64 g_raster_n,g_raster_calls,g_poly3_calls;
 
 U16 RasterRand(U64 fsb)
 {//RandU16 for the dither, on the task at fsb (Kernel/KMathB.HC).
-  U64 seed=*(U64 *)(mem+fsb+of_task.rand_seed);
+  U64 seed=*(mem+fsb+of_task.rand_seed)(U64*);
   seed=LIN_CONGRUE_A*seed^(seed&0xFFFFFFFF0000)>>16;
   seed+=LIN_CONGRUE_C;
-  if (!(*(U32 *)(mem+fsb+of_task.task_flags)>>TASKf_NONTIMER_RAND&1))
+  if (!(*(mem+fsb+of_task.task_flags)(U32*)>>TASKf_NONTIMER_RAND&1))
     seed^=TscRead;
-  *(U64 *)(mem+fsb+of_task.rand_seed)=seed;
+  *(mem+fsb+of_task.rand_seed)(U64*)=seed;
   return seed&0xFFFF;
 }
 I64 RasterDone(I64 cnt)                              // RAX=cnt, pop ret + 6 args (callee-pop), return to caller
@@ -652,32 +613,32 @@ I64 RasterDone(I64 cnt)                              // RAX=cnt, pop ret + 6 arg
 
 I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
 {//GrHLine and GrVLine: one clipping, depth and raster-operation path.
-  U32 flags = *(U32 *)(mem + dc + of_dc.flags);
-  U64 zbuf = *(U64 *)(mem + dc + of_dc.depth_buf), win = *(U64 *)(mem + dc + of_dc.win_task);
-  U64 body = *(U64 *)(mem + dc + of_dc.body), fsb = msr_fsbase;
-  I64 stride = *(I32 *)(mem + dc + of_dc.width_internal), width = *(I32 *)(mem + dc + of_dc.width), height = *(I32 *)(mem + dc + of_dc.height);
-  U32 col_w = *(U32 *)(mem + dc + of_dc.color); 	    // packed: b0=color, b1=draw-mode, b2=color2, b3=dither flags
-  I64 bg = *(U32 *)(mem + dc + of_dc.bkcolor) & 0xFF;
+  U32 flags = *(mem + dc + of_dc.flags)(U32*);
+  U64 zbuf = *(mem + dc + of_dc.depth_buf)(U64*), win = *(mem + dc + of_dc.win_task)(U64*);
+  U64 body = *(mem + dc + of_dc.body)(U64*), fsb = msr_fsbase;
+  I64 stride = *(mem + dc + of_dc.width_internal)(I32*), width = *(mem + dc + of_dc.width)(I32*), height = *(mem + dc + of_dc.height)(I32*);
+  U32 col_w = *(mem + dc + of_dc.color)(U32*); 	    // packed: b0=color, b1=draw-mode, b2=color2, b3=dither flags
+  I64 bg = *(mem + dc + of_dc.bkcolor)(U32*) & 0xFF;
   I64 clip_lo = 0, clip_hi = 0, plotcnt = 0, i, idx, zptr, zslope = 0, zacc, cur_z; I64 dith_en = 0, dith_rand = 0, mode, color, w1, w2, cw;
   if (!zbuf) return -1;                                                            // no-z fast-fill path -> emulate
   I64 dimA = width, dimC = height, step = 1;        // moving-axis limit / fixed-axis limit / pixel stride
   I64 sA = of_task.scroll_x, sC = of_task.scroll_y, eA = of_dc.min_x, eAh = of_dc.max_x, eC = of_dc.min_y, eCh = of_dc.max_y, pA = of_task.pix_left, pAl = of_task.pix_right, pC = of_task.pix_top, pCl = of_task.pix_bottom, nA = of_dc.cur_x, nC = of_dc.cur_y;
   if (vert) { dimA = height; dimC = width; step = stride; sA = of_task.scroll_y; sC = of_task.scroll_x; eA = of_dc.min_y; eAh = of_dc.max_y; eC = of_dc.min_x; eCh = of_dc.max_x; pA = of_task.pix_top; pAl = of_task.pix_bottom; pC = of_task.pix_left; pCl = of_task.pix_right; nA = of_dc.cur_y; nC = of_dc.cur_x; }
   // ---- DC offset (flag bit 0xe) ----
-  if ((flags >> 0xe) & 1) { x1 += *(I64 *)(mem + win + sA); x2 += *(I64 *)(mem + win + sA); y  += *(I64 *)(mem + win + sC); z1 += *(I64 *)(mem + win + of_task.scroll_z); z2 += *(I64 *)(mem + win + of_task.scroll_z); }
+  if ((flags >> 0xe) & 1) { x1 += *(mem + win + sA)(I64*); x2 += *(mem + win + sA)(I64*); y  += *(mem + win + sC)(I64*); z1 += *(mem + win + of_task.scroll_z)(I64*); z2 += *(mem + win + of_task.scroll_z)(I64*); }
   // ---- bbox update (flag bit 0x10) ----
   if ((flags >> 0x10) & 1) {
-    if (x1 < *(I64 *)(mem + dc + eA)) *(I64 *)(mem + dc + eA) = x1; if (x1 > *(I64 *)(mem + dc + eAh)) *(I64 *)(mem + dc + eAh) = x1; if (x2 < *(I64 *)(mem + dc + eA)) *(I64 *)(mem + dc + eA) = x2; if (x2 > *(I64 *)(mem + dc + eAh)) *(I64 *)(mem + dc + eAh) = x2;
-    if (y  < *(I64 *)(mem + dc + eC)) *(I64 *)(mem + dc + eC) = y; if (y  > *(I64 *)(mem + dc + eCh)) *(I64 *)(mem + dc + eCh) = y; }
+    if (x1 < *(mem + dc + eA)(I64*)) *(mem + dc + eA)(I64*) = x1; if (x1 > *(mem + dc + eAh)(I64*)) *(mem + dc + eAh)(I64*) = x1; if (x2 < *(mem + dc + eA)(I64*)) *(mem + dc + eA)(I64*) = x2; if (x2 > *(mem + dc + eAh)(I64*)) *(mem + dc + eAh)(I64*) = x2;
+    if (y  < *(mem + dc + eC)(I64*)) *(mem + dc + eC)(I64*) = y; if (y  > *(mem + dc + eCh)(I64*)) *(mem + dc + eCh)(I64*) = y; }
   if (y < 0) return 0;
   if (x2 < x1) { i = x1; x1 = x2; x2 = i; i = z1; z1 = z2; z2 = i; }
   if (x2 < 0) return 0;
   if (x1 < 0) { clip_lo = -x1; x1 = 0; }
   // ---- win clip (flag bit 0xe) ----
   if ((flags >> 0xe) & 1) {
-    x1 += *(I64 *)(mem + win + pA); x2 += *(I64 *)(mem + win + pA); if (x1 > *(I64 *)(mem + win + pAl)) return 0;
-    if (x2 > *(I64 *)(mem + win + pAl)) { clip_hi = x2 - *(I64 *)(mem + win + pAl); x2 = *(I64 *)(mem + win + pAl); }
-    y += *(I64 *)(mem + win + pC); if (y < 0) return 0; if (y > *(I64 *)(mem + win + pCl)) return 0; if (x2 < 0) return 0; }
+    x1 += *(mem + win + pA)(I64*); x2 += *(mem + win + pA)(I64*); if (x1 > *(mem + win + pAl)(I64*)) return 0;
+    if (x2 > *(mem + win + pAl)(I64*)) { clip_hi = x2 - *(mem + win + pAl)(I64*); x2 = *(mem + win + pAl)(I64*); }
+    y += *(mem + win + pC)(I64*); if (y < 0) return 0; if (y > *(mem + win + pCl)(I64*)) return 0; if (x2 < 0) return 0; }
   if (x1 >= dimA) return 0; if (y >= dimC) return 0;
   // ---- z-slope + accumulator (z interpolates z1..z2 over the ORIGINAL span; clip-adjusted start) ----
   I64 count = (x2 + clip_hi) - (x1 - clip_lo);
@@ -685,11 +646,11 @@ I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
   zptr = zbuf + idx * 4; if (count) zslope = ((z2 - z1) << 32) / count; zacc = z1 << 32; zacc += clip_lo * zslope; if (x2 >= dimA) x2 = dimA - 1;
   // ---- collision distance metric (flag bit 0xb): nearest squared dist from (cur) over the span ----
   if ((flags >> 0xb) & 1) {
-    I64 cx = *(I32 *)(mem + dc + nA), cy = *(I32 *)(mem + dc + nC), r13, dx;
+    I64 cx = *(mem + dc + nA)(I32*), cy = *(mem + dc + nC)(I32*), r13, dx;
     if (cx >= x1 && cx <= x2) r13 = 0;
     else if (cx < x1) { dx = x1 - cx; r13 = dx * dx; }
     else { dx = cx - x2; r13 = dx * dx; }
-    I64 dy = y - cy; r13 += dy * dy; if (r13 < *(I64 *)(mem + dc + of_dc.nearest_dist)) *(I64 *)(mem + dc + of_dc.nearest_dist) = r13; }
+    I64 dy = y - cy; r13 += dy * dy; if (r13 < *(mem + dc + of_dc.nearest_dist)(I64*)) *(mem + dc + of_dc.nearest_dist)(I64*) = r13; }
   if ((flags >> 0xc) & 1) return 0;
   // ---- dither setup from the packed color word (b3 bits 0x80=random / 0x40=ordered) ----
   // matches GrHLine exactly (source recovered from the in-RAM kernel text + the compiled jump table):
@@ -700,25 +661,25 @@ I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
   w2 = (col_w >> 16) & 0xFFFF;                         // second dither color word
   cw = w1;                                             // active (color,rop) word
   if ((col_w >> 24) & 0xC0) { dith_en = 1; w2 = (w2 & 0xFF) | (w1 & 0xFF00);   // c1.rop = c0.rop
-    if ((col_w >> 24) & 0x80) { dith_rand = 1; if (RasterRand(fsb) < *(U64 *)(mem + dc + of_dc.dither_probability_u16)) cw = w2; }   // initial roll picks pixel 0's word
+    if ((col_w >> 24) & 0x80) { dith_rand = 1; if (RasterRand(fsb) < *(mem + dc + of_dc.dither_probability_u16)(U64*)) cw = w2; }   // initial roll picks pixel 0's word
     else { if ((x1 ^ y) & 1) { i = w1; w1 = w2; w2 = i; } cw = w1; } }
   // ---- occlusion (char_clear): GrHLine recomputes IsPixCovered0 every 8 px and skips covered ones. covered =
   //   win->win_z_num(@+0x30c) < gr.win_z_buf[(y>>3)*80 + (x>>3)]. Only when screen-bitmap, not-on-top, not winmgr.
-  I64 need_cov = ((flags >> 0xe) & 1) && !((flags >> 0x11) & 1) && win && *(U64 *)(mem + win + of_task.next_task) != *(U64 *)(mem + guest.sys_winmgr_task);
+  I64 need_cov = ((flags >> 0xe) & 1) && !((flags >> 0x11) & 1) && win && *(mem + win + of_task.next_task)(U64*) != *(mem + guest.sys_winmgr_task)(U64*);
   U64 wzbuf = 0; I64 wzn = 0, cov_row = 0, covM = 1, cc = 1;   // cell = cov_row + (moving>>3)*covM: H walks columns, V walks rows (*80)
   if (vert) covM = 80;
-  if (need_cov) { wzbuf = *(U64 *)(mem + guest.gr_win_z_buf); if (wzbuf && wzbuf < mem_size) { wzn = *(U16 *)(mem + win + of_task.win_z_num); if (vert) cov_row = y >> 3; else cov_row = (y >> 3) * 80; cc = wzn >= *(U16 *)(mem + wzbuf + (cov_row + (x1 >> 3) * covM) * 2); } else need_cov = 0; }
+  if (need_cov) { wzbuf = *(mem + guest.gr_win_z_buf)(U64*); if (wzbuf && wzbuf < mem_size) { wzn = *(mem + win + of_task.win_z_num)(U16*); if (vert) cov_row = y >> 3; else cov_row = (y >> 3) * 80; cc = wzn >= *(mem + wzbuf + (cov_row + (x1 >> 3) * covM) * 2)(U16*); } else need_cov = 0; }
   //Malformed drawing contexts fall back to guest code.
   if (idx < 0 || x2 < x1 || (x2 - x1 + 1) > 4096 || !body || body + idx + (x2 - x1 + 1) * step >= mem_size ||
       zbuf + (idx + (x2 - x1 + 1) * step) * 4 >= mem_size) return -1;
   // ---- per-pixel span (r14 draw-enable is always 1 in the handled case) ----
   for (i = x1; i <= x2; i++) {
     if (cc) { cur_z = zacc >> 32;                      // signed 32-bit current z (z-test+draw gated by char_clear)
-      I64 draw = 1; if (cur_z < 0) draw = 0; else if (cur_z > *(I32 *)(mem + zptr)) draw = 0; else *(I32 *)(mem + zptr) = cur_z;
+      I64 draw = 1; if (cur_z < 0) draw = 0; else if (cur_z > *(mem + zptr)(I32*)) draw = 0; else *(mem + zptr)(I32*) = cur_z;
       if (draw) { color = cw & 0xFF; mode = (cw >> 8) & 0xFF;   // rop dispatch per the REAL jump table: 1=XOR, 2=COLLISION(count, no write), all others=WRITE
-	if (mode == 1) mem[body + idx] ^= color; else if (mode == 2) { I64 v = mem[body + idx]; if (v != 0xFF && v != bg) (*(U64 *)(mem + dc + of_dc.collision_cnt))++; } else mem[body + idx] = color; plotcnt++; } }
-    if (dith_en) { if (dith_rand) { if (RasterRand(fsb) < (*(U64 *)(mem + dc + of_dc.dither_probability_u16))) cw = w2; else cw = w1; } else { I64 t = w1; w1 = w2; w2 = t; cw = w1; } }
-    if (need_cov && ((i + 1) & 7) == 0 && i + 1 <= x2) cc = wzn >= *(U16 *)(mem + wzbuf + (cov_row + ((i + 1) >> 3) * covM) * 2);   // recompute char_clear at the next 8-px boundary
+	if (mode == 1) mem[body + idx] ^= color; else if (mode == 2) { I64 v = mem[body + idx]; if (v != 0xFF && v != bg) (*(mem + dc + of_dc.collision_cnt)(U64*))++; } else mem[body + idx] = color; plotcnt++; } }
+    if (dith_en) { if (dith_rand) { if (RasterRand(fsb) < (*(mem + dc + of_dc.dither_probability_u16)(U64*))) cw = w2; else cw = w1; } else { I64 t = w1; w1 = w2; w2 = t; cw = w1; } }
+    if (need_cov && ((i + 1) & 7) == 0 && i + 1 <= x2) cc = wzn >= *(mem + wzbuf + (cov_row + ((i + 1) >> 3) * covM) * 2)(U16*);   // recompute char_clear at the next 8-px boundary
     idx += step; zptr += step * 4; zacc += zslope; }
   g_raster_calls++;
   return plotcnt;
@@ -731,8 +692,8 @@ I64 GrPoly3HLE()        // fires at GrFillPoly3's prologue: fan-triangulate the 
 {
   U64 dc, poly, body, zbuf, rmat; I64 n, i, S = 12, ax, ay, az, bx, by, bz, cx, cy, cz,res=0;   // CD3I32 = {I32 x,y,z} = 12 bytes
   dc = RdMem(reg[4] + 8, 8); n = RdMem(reg[4] + 0x10, 8); poly = RdMem(reg[4] + 0x18, 8);
-  body = *(U64 *)(mem + dc + of_dc.body); zbuf = *(U64 *)(mem + dc + of_dc.depth_buf);
-  U32 flags=*(U32 *)(mem+dc+of_dc.flags);
+  body = *(mem + dc + of_dc.body)(U64*); zbuf = *(mem + dc + of_dc.depth_buf)(U64*);
+  U32 flags=*(mem+dc+of_dc.flags)(U32*);
   if (flags&0x600) return 0;
   if ((flags&0x100) &&
         RdMem(dc+of_dc.transform,8)!=g_dc_transform) return 0;
@@ -744,16 +705,16 @@ I64 GrPoly3HLE()        // fires at GrFillPoly3's prologue: fan-triangulate the 
   // transform (Castle Frankenstein's 3D walls set dc->transform=CFTransform + a rotation dc->r), fall
   // back to the OS's GrFillPoly3 so it transforms first. CDC offsets are stable across builds:
   // dc->x/y/z @0xD8/0xDC/0xE0 (I32), dc->r @0xC8 (-> 4x4 matrix; identity = 0x100000000 on the diagonal).
-  if (*(I32 *)(mem + dc + of_dc.x) || *(I32 *)(mem + dc + of_dc.y) || *(I32 *)(mem + dc + of_dc.z)) return 0;
-  rmat = *(U64 *)(mem + dc + of_dc.r); if (!rmat) return 0;
+  if (*(mem + dc + of_dc.x)(I32*) || *(mem + dc + of_dc.y)(I32*) || *(mem + dc + of_dc.z)(I32*)) return 0;
+  rmat = *(mem + dc + of_dc.r)(U64*); if (!rmat) return 0;
   for (i = 0; i < 16; i++) {
-    if (i == 0 || i == 5 || i == 10 || i == 15) { if (*(I64 *)(mem + rmat + i * 8) != 0x100000000) return 0; }
-    else if (*(I64 *)(mem + rmat + i * 8)) return 0;
+    if (i == 0 || i == 5 || i == 10 || i == 15) { if (*(mem + rmat + i * 8)(I64*) != 0x100000000) return 0; }
+    else if (*(mem + rmat + i * 8)(I64*)) return 0;
   }
-  ax = *(I32 *)(mem + poly); ay = *(I32 *)(mem + poly + 4); az = *(I32 *)(mem + poly + 8);   // fan from poly[0]
+  ax = *(mem + poly)(I32*); ay = *(mem + poly + 4)(I32*); az = *(mem + poly + 8)(I32*);   // fan from poly[0]
   for (i=1;i<n-1;i++) {
-    bx = *(I32 *)(mem + poly + i * S);     by = *(I32 *)(mem + poly + i * S + 4);     bz = *(I32 *)(mem + poly + i * S + 8);
-    cx = *(I32 *)(mem + poly + (i + 1) * S); cy = *(I32 *)(mem + poly + (i + 1) * S + 4); cz = *(I32 *)(mem + poly + (i + 1) * S + 8);
+    bx = *(mem + poly + i * S)(I32*);     by = *(mem + poly + i * S + 4)(I32*);     bz = *(mem + poly + i * S + 8)(I32*);
+    cx = *(mem + poly + (i + 1) * S)(I32*); cy = *(mem + poly + (i + 1) * S + 4)(I32*); cz = *(mem + poly + (i + 1) * S + 8)(I32*);
     res+=PolyTri(dc,ax,ay,az,bx,by,bz,cx,cy,cz);
   }
   g_poly3_calls++;
@@ -1028,9 +989,9 @@ I64 RunCore(I64 budget)
     if (halted>=2)
       return -halted;
     //Atomic load: it acquires the sender's writes before the handler runs.
-    ip=__a_or64(&g_ipi_pending[MyCore()],0);
+    ip=__a_or64(&g_ipi_pending[MyCore],0);
     if (ip && rfl&F_IF) {
-      __a_and64(&g_ipi_pending[MyCore()],0);
+      __a_and64(&g_ipi_pending[MyCore],0);
       halted=0;
       DoInt(ip&0xFF,0,0);
     }

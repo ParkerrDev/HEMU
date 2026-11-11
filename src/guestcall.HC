@@ -15,7 +15,7 @@
 // is in a CLI section right then, the call stays PENDING and Run() takes it at the first IF=1
 // point of the next frame (the same spot where it would deliver an IRQ), including while HLT idle.
 //
-// Only core 0 injects (MyCore()==0); APs never run this code. A callee that faults or exceeds the
+// Only core 0 injects (MyCore==0); APs never run this code. A callee that faults or exceeds the
 // budget is reported as FAILED and the interrupted state is still restored (its frame below RSP is
 // dead space by the x86 convention, so abandoning it is harmless).
 //============================================================================
@@ -28,7 +28,7 @@ U64 g_gc_xmm_lo[16],g_gc_xmm_hi[16];
 U0 GuestCallRun()		     // precondition: state PENDING, (rfl & F_IF), halted <= 1, core 0
 {
   I64 i;
-  MemCpy(&g_gc_save,&g_cpu_st[MyCore()],sizeof(CCpuState));
+  MemCpy(&g_gc_save,&g_cpu_st[MyCore],sizeof(CCpuState));
   MemCpy(g_gc_xmm_lo,xmm_lo,sizeof(g_gc_xmm_lo));
   MemCpy(g_gc_xmm_hi,xmm_hi,sizeof(g_gc_xmm_hi));
   g_gc_savlock = lockf; g_gc_savbad = g_badop;
@@ -39,7 +39,7 @@ U0 GuestCallRun()		     // precondition: state PENDING, (rfl & F_IF), halted <= 
   while (rip != g_gc_sentinel && g_gc_steps < g_gc_budget && halted == 0) { Step(); g_gc_steps++; }
   if (rip == g_gc_sentinel) { g_gc_res = reg[0]; g_gc_err = 0; g_gc_state = GC_DONE; }
   else { g_gc_res = 0; if (halted) g_gc_err = GC_ERR_FAULT; else g_gc_err = GC_ERR_BUDGET; g_gc_state = GC_FAILED; }
-  MemCpy(&g_cpu_st[MyCore()],&g_gc_save,sizeof(CCpuState));
+  MemCpy(&g_cpu_st[MyCore],&g_gc_save,sizeof(CCpuState));
   MemCpy(xmm_lo,g_gc_xmm_lo,sizeof(g_gc_xmm_lo));
   MemCpy(xmm_hi,g_gc_xmm_hi,sizeof(g_gc_xmm_hi));
   lockf = g_gc_savlock; g_badop = g_gc_savbad;
@@ -50,7 +50,7 @@ U0 GuestCallRun()		     // precondition: state PENDING, (rfl & F_IF), halted <= 
 
 I64 GuestCallTry()		     // run the pending call now if this is a safe point; returns the state
 {
-  if (g_gc_state != GC_PENDING || MyCore()) return g_gc_state;
+  if (g_gc_state != GC_PENDING || MyCore) return g_gc_state;
   if (halted >= 2 || !(rfl & F_IF)) return g_gc_state;
   GuestCallRun();
   return g_gc_state;

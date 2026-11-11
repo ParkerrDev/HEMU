@@ -14,6 +14,7 @@ This repository is HolyC source and the snapshots it boots. Nothing else.
 | Path | What |
 |---|---|
 | `src/cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses, plus the devices it touches (PIC, PIT, HPET, CMOS RTC, LAPIC/IOAPIC MMIO, PS/2, ATA, VGA DAC) and the HLE hooks |
+| `src/Mem.HC` | unaligned RAM reads/writes, the guest RAM alias, and saved-guest MMIO/IPI routing |
 | `src/Fpu.HC`, `src/Alu.HC`, `src/Shift.HC` | scalar floating-point, integer arithmetic and shift/rotate routines shared by instruction decoding |
 | `src/host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |
 | `src/core.HC` | per-core CPU state (`CCpuState g_cpu_st[]` behind the `reg` / `rip` / `rfl` accessors) and the SMP and guest-call scaffolding every entry shares |
@@ -29,9 +30,12 @@ This repository is HolyC source and the snapshots it boots. Nothing else.
 `src/host.HC` is the whole interface. Required: load the snapshot into guest RAM, present a frame, VGA
 palette writes, ATA sector reads and writes, mouse and keyboard state, wall-clock pacing, a speaker tone.
 Optional: the `__jit_*` / `__ap_run` hooks a host may implement to run hot guest code natively - a host that
-returns 0 from `__jit_state` gets a pure interpreter. Two compiler intrinsics complete it: `MyCore()` (this
+returns 0 from `__jit_state` gets a pure interpreter. Two compiler intrinsics complete it: `MyCore` (this
 core's index) and the `__a_<op><bits>` atomics, both documented in the header. Everything else the source
-calls is standard HolyC.
+calls is standard HolyC. `MyCore` is a host intrinsic; a native adapter uses
+TempleOS's `Gs->num`. Bare intrinsic reads require HolyC-wasm A27 (52f06fb) or later.
+The extracted memory module has 324 independent V5.03 output comparisons;
+this does not establish native compatibility for the remaining CPU source.
 
 The host drives one `Main` call per display frame. `Main` runs `HemuInit` the first time and `Frame` every
 time; `Frame` pulls input, runs the instruction budget the host asked for, and presents. A host that runs

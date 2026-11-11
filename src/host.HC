@@ -50,7 +50,7 @@ import I64 __jit_dispatch(I64 budget);                // run a chain of compiled
 import I64 __ap_run(U64 at, I64 budget);             // SMP application cores: their per-core chain (0 = not compiled)
 
 // ---- compiler intrinsics (not imports) --------------------------------------------------------
-//   I64 MyCore();                          this core's index; 0 on a single-core build. holyc-wasm: a per-instance
+//   I64 MyCore;                          this core's index; 0 on a single-core build. holyc-wasm: a per-instance
 //                                          WASM global the host sets per worker. TempleOS's compiler: Gs->num.
 //   U64 __a_<op><bits>(U8 *addr, U64 v[, U64 nv]);   op = add|and|or|xor|xchg|cmpxchg, bits = 8|16|32|64:
 //                                          sequentially-consistent atomic RMW on shared memory, returning the old

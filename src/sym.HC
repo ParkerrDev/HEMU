@@ -33,14 +33,14 @@ U64 GuestU64(U64 a)
 {//Eight bytes of guest RAM, 0 outside it. mem_size is unsigned, so a
 //negative a is outside too.
   if (a<mem_size-8)
-    return *(U64 *)(mem+a);
+    return *(mem+a)(U64*);
   return 0;
 }
 
 U64 GuestU32(U64 a)
 {
   if (a<mem_size-4)
-    return *(U32 *)(mem+a);
+    return *(mem+a)(U32*);
   return 0;
 }
 
@@ -246,7 +246,7 @@ U64 GuestCallRet(U64 fun,U64 callee,I64 len)
   for (i=0;i<len;i++) {
     a=fun+i;
     if (a+5<mem_size && mem[a]==0xE8 &&
-	  ((a+5+*(I32 *)(mem+a+1))&0xFFFFFFFF)==callee)
+	  ((a+5+*(mem+a+1)(I32*))&0xFFFFFFFF)==callee)
       return a+5;
   }
   return 0;
