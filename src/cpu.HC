@@ -1009,22 +1009,24 @@ Bool CoreAttach()
   return res;
 }
 
-I64 g_core_faults[NCORES];	//Faults each core has stopped on.
+U64 CpuFault(I64 which=0)
+{//First stopped CPU: packed core/reason or its instruction pointer.
+  I64 i;
+  for (i=0;i<g_ncore;i++)
+    if (g_cpu_st[i].f_halted>=2) {
+      if (which) return g_cpu_st[i].f_rip;
+      return i<<8|g_cpu_st[i].f_halted;
+    }
+  return 0;
+}
 
 I64 RunCore(I64 budget)
-{//An application core's turn: up to budget instructions, with no device
-//ticks (those are core 0's). Takes a pending IPI at IF=1 and comes back
-//early when the core idles in HLT. Returns how many instructions ran, or
-//-halted when a fault stopped the core. The first fault is cleared, so
-//the core goes on serving jobs.
-  I64 start=icount,lim=icount+budget,ip,b,res;
+{//AP instruction budget without core zero's device ticks.
+//A fault remains stopped until the machine is restored or restarted.
+  I64 start=icount,lim=icount+budget,ip,b;
   while (icount<lim) {
-    if (halted>=2) {
-      res=-halted;
-      if (!g_core_faults[MyCore()]++)
-	halted=0;
-      return res;
-    }
+    if (halted>=2)
+      return -halted;
     //Atomic load: it acquires the sender's writes before the handler runs.
     ip=__a_or64(&g_ipi_pending[MyCore()],0);
     if (ip && rfl&F_IF) {

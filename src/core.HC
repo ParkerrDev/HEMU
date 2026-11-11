@@ -56,6 +56,6 @@ CCpuState g_cpu_st[NCORES];
 #define xmm_lo	   g_xmm_lo[MyCore()]	//XMM halves are per core.
 #define xmm_hi	   g_xmm_hi[MyCore()]
 #define lockf	   g_lockf[MyCore()]	//The current instruction has LOCK.
-I64 g_ncore;				//Active cores.
+I64 g_ncore=1;				//Active cores.
 U64 g_ipi_pending[NCORES];		//IPI vector,zero when none.
 U64 g_icr_high[NCORES]; 		//Destination of the next IPI.
