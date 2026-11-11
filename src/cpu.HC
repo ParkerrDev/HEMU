@@ -571,7 +571,7 @@ U0 OpX87(U64 op)
   if (op == 0xD9) {
     if (sub == 0) FPush(FStv(sti));                                  // FLD  st(i)
     else if (sub == 1) { a = FStv(0); FStset(0, FStv(sti)); FStset(sti, a); }  // FXCH
-    else if (sub == 4) { if (sti == 0) FStset(0, -FStv(0)); else if (sti == 1) { a = FStv(0); if (a < 0) FStset(0, -a); } else if (sti == 4) { x87_sw &= ~0x0200; FCmpSW(FStv(0), 0.0); } }  // FCHS/FABS/FTST (Sign uses FTST + FNSTSW)
+    else if (sub == 4) { if (sti == 0) FStset(0, -FStv(0)); else if (sti == 1) FStset(0,(FStv(0)(I64)&0x7FFFFFFFFFFFFFFF)(F64)); else if (sti == 4) { x87_sw &= ~0x0200; FCmpSW(FStv(0), 0.0); } }  // FCHS/FABS/FTST (Sign uses FTST + FNSTSW)
     else if (sub == 5) {                                             // FLD1/FLDL2T/FLDL2E/FLDPI/FLDLG2/FLDLN2/FLDZ
       if (sti == 0) FPush(1.0); else if (sti == 1) FPush(BitsToF64(0x400A934F0979A371)); else if (sti == 2) FPush(BitsToF64(0x3FF71547652B82FE)); else if (sti == 3) FPush(BitsToF64(0x400921FB54442D18)); else if (sti == 4) FPush(BitsToF64(0x3FD34413509F79FF)); else if (sti == 5) FPush(BitsToF64(0x3FE62E42FEFA39EF)); else if (sti == 6) FPush(0.0); }
     else if (sub == 6) {                                             // F2XM1/FYL2X/FPTAN/FPATAN/FXTRACT/FDECSTP/FINCSTP
