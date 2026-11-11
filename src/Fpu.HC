@@ -146,15 +146,32 @@ U0 FCmpSW(F64 arg1,F64 arg2)
     x87_sw|=0x4000;
 }
 
-U0 FCmpFL(F64 arg1,F64 arg2)
-{//FCOMI/FUCOMI result in ZF/PF/CF.
+Bool FCmpFL(F64 arg1,F64 arg2,Bool unordered=FALSE)
+{//FCOMI/FUCOMI clear OF/SF/AF as well as setting ZF/PF/CF.
+  U64 bits1=arg1(U64)&0x7FFFFFFFFFFFFFFF,
+	bits2=arg2(U64)&0x7FFFFFFFFFFFFFFF;
+  Bool nan=bits1>0x7FF0000000000000 || bits2>0x7FF0000000000000,
+	invalid=nan && !unordered;
+  if (bits1>0x7FF0000000000000 && !(bits1&0x8000000000000) ||
+	bits2>0x7FF0000000000000 && !(bits2&0x8000000000000))
+    invalid=TRUE;
+  x87_sw&=~0x200;
+  rfl&=~(F_OF|F_SF|F_AF);
+  if (invalid) {
+    x87_sw|=1;
+    if (!(x87_cw&1)) {
+      x87_sw|=0x8080;
+      return FALSE; //Unmasked invalid leaves ZF/PF/CF and TOP unchanged.
+    }
+  }
   rfl&=~(F_ZF|F_PF|F_CF);
-  if (arg1!=arg1 || arg2!=arg2)
+  if (nan)
     rfl|=F_ZF|F_PF|F_CF;
   else if (arg1==arg2)
     rfl|=F_ZF;
   else if (arg1<arg2)
     rfl|=F_CF;
+  return TRUE;
 }
 
 F64 FArith(I64 op,F64 arg1,F64 arg2)
@@ -432,14 +449,14 @@ U0 OpX87(U64 op)
     case 0xDB:
       if (sub==4 && sti==3) { //FNINIT.
 	fsp=0;x87_cw=0x37F;x87_sw=0;
-      } else if (sub==6 || sub==7)
-	FCmpFL(FStv(0),FStv(sti));
+      } else if (sub==5 || sub==6)
+	FCmpFL(FStv(0),FStv(sti),sub==5);
       break;
     case 0xDF:
       if (sub==4 && !sti)
 	reg[0]=reg[0]&~0xFFFF|x87_sw&0xFFFF;
-      else if (sub==6 || sub==7) {
-	FCmpFL(FStv(0),FStv(sti));FPopv;
+      else if (sub==5 || sub==6) {
+	if (FCmpFL(FStv(0),FStv(sti),sub==5)) FPopv;
       }
   }
 }

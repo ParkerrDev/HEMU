@@ -65,6 +65,7 @@ U0 UpdateSpk()
 
 #define F_CF 0x0001
 #define F_PF 0x0004
+#define F_AF 0x0010
 #define F_ZF 0x0040
 #define F_SF 0x0080
 #define F_IF 0x0200

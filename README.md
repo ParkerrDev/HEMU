@@ -14,6 +14,7 @@ This repository is HolyC source and the snapshots it boots. Nothing else.
 | Path | What |
 |---|---|
 | `src/cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses, plus the devices it touches (PIC, PIT, HPET, CMOS RTC, LAPIC/IOAPIC MMIO, PS/2, ATA, VGA DAC) and the HLE hooks |
+| `src/Fpu.HC`, `src/Alu.HC`, `src/Shift.HC` | scalar floating-point, integer arithmetic and shift/rotate routines shared by instruction decoding |
 | `src/host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |
 | `src/core.HC` | per-core CPU state (`CCpuState g_cpu_st[]` behind the `reg` / `rip` / `rfl` accessors) and the SMP and guest-call scaffolding every entry shares |
 | `src/guestcall.HC` | host-injected guest calls, the backend execution primitive (below) |
@@ -81,6 +82,15 @@ transforms. Persistent checks compare their pixels, depth and collision results
 against the original guest routines with HLE disabled. The SMP build (`SMP_SNAP`)
 runs one core per host thread over shared memory and has separate worker/barrier
 regressions. Browser networking for TOOM multiplayer is not implemented.
+
+The x87 comparison contract follows Intel SDM revision 089: FCOMI/FUCOMI
+clear OF/SF/AF, preserve ZF/PF/CF and TOP on unmasked invalid operands, and
+record IE/ES/B. Measurements from Intel i9-14900HX and QEMU/TCG differ in
+this edge case; the host's comparison tests preserve those measurements and
+identify the discrepancy explicitly. Registers currently use binary64, and
+80-bit precision, the complete tag model and pending #MF delivery remain
+unsupported. Transcendental results use host math and can differ from native
+x87 near integer pixel/texture boundaries.
 
 These checks cover observed workloads and regressions, not complete x86 hardware conformance or complete
 game playthroughs.
