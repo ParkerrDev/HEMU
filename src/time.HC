@@ -45,6 +45,7 @@ U0 TimeAdd(I64 ns)
 {//ns nanoseconds pass for the TSC, the HPET and the PIT.
   I64 n;
   tsc+=ns;
+  KbdTick;
   hpet_frac+=ns*hpet_freq;
   hpet_ctr+=hpet_frac/NS_SEC;
   hpet_frac%=NS_SEC;

@@ -30,7 +30,7 @@ import I64 __host_msx();                              // absolute mouse x (0..63
 import I64 __host_msy();                              // absolute mouse y (0..479)
 import I64 __host_msb();                              // mouse buttons: bit0 left, bit1 right
 import I64 __host_wheel();                            // cumulative mouse-wheel position (-> ms.pos.z)
-import I64 __host_key();                              // next set-1 scancode (bit 8+: arrival entropy), <0 when drained
+import I64 __host_key();                              // next raw set-1 byte, <0 when drained
 import I64 __host_ns();                               //nanoseconds since the last frame
 import I64 __host_dt();                               // real milliseconds since the last frame (wall-clock pacing)
 import I64 __host_budget();                           // guest instructions to run this frame

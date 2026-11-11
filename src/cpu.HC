@@ -61,7 +61,7 @@ I64 rtc_idx;                         // selected CMOS register (last OUT 0x70)
 U64 rtc_base_sec;                    // seconds-of-day at snapshot; + elapsed below
 I64 rtc_dow, rtc_day, rtc_mon, rtc_year;
 // PS/2 keyboard (IRQ1, port 0x60) + mouse (IRQ12). Host pushes scancodes/packets here.
-I64 kbd_q[64], kbd_qh, kbd_qt;        // keyboard scancode FIFO (host pushes, IRQ1 drains)
+#include "keyboard.HC"
 I64 ms_byte0, ms_byte1, ms_byte2, ms_has, ms_phase;   // pending PS/2 mouse 3-byte packet
 // PS/2 controller command-response FIFO (polled by KbdCmdRead during mouse/kbd install + config).
 // Without this the mouse install (MsHardRst) never gets its 0xFA ACKs, ms_hard.install_in_progress
@@ -72,12 +72,6 @@ U0 Ps2Resp(I64 b, I64 isms) { ps2q[ps2qt & 15] = b; ps2q_ms[ps2qt & 15] = isms; 
 I64 pit2_reload, pit2_div, pit2_wlo, spk_on;
 U0 UpdateSpk()
 { if (spk_on && pit2_div) __snd(1193182.0 / pit2_div); else __snd(0.0); }
-U0 InjectKey(I64 sc)                  // low 8 = set-1 scancode; bits 8+ = host key-arrival entropy.
-{ // TempleOS harvests randomness from GetTSC at key IRQs (GodBitsIns). Our tsc is a deterministic
-  // function of the frame schedule, so without this the God apps draw the SAME bits every time
-  // ('musical' forever). The host's real keystroke timing restores the hardware physics.
-  tsc += sc >> 8; kbd_q[kbd_qt & 63] = sc & 0xFF; kbd_qt++; pic1_irr |= 2;
-}
 U0 InjectMouse(I64 b0, I64 b1, I64 b2) { ms_byte0=b0; ms_byte1=b1; ms_byte2=b2; ms_has=3; ms_phase=0; pic2_irr |= 0x10; }  // IRQ12
 // MMIO: any guest access at/above mem_size goes here. LAPIC/HPET/IOAPIC live high
 // in the physical map and are NOT in the RAM snapshot, so we emulate the few
@@ -418,7 +412,18 @@ U0 IoOut(U64 port, U64 v)
       else if (v == 0xF2) Ps2Resp(0x00, 1);             // get-id -> standard mouse
       return; }
     Ps2Resp(0xFA, 0);                                   // keyboard command ACK
-    if (v == 0xFF) Ps2Resp(0xAA, 0);                    // kbd reset -> BAT ok
+    if (kbd_cmd) {
+      if (kbd_cmd==0xF3) {
+        kbd_type=v&0x7F;
+        kbd_repeat_ns=tsc+KbdDelay;
+      }
+      kbd_cmd=0;
+    } else if (v==0xF3 || v==0xED)
+      kbd_cmd=v;
+    else if (v==0xFF) {
+      kbd_repeat_key=0;kbd_type=0x2B;
+      Ps2Resp(0xAA,0);
+    }
     return; }
   if (port == 0x70) { rtc_idx = v & 0x7F; return; }     // CMOS register select (bit7 = NMI disable)
   if (port == 0x43) {                                   // PIT command: bits 6 and 7 pick the channel
@@ -1334,7 +1339,7 @@ U0 Run(I64 maxi)
 
 U0 Reset()
 {
-  I64 i; TimeRst; for (i = 0; i < 16; i++) reg[i] = 0; rip = 0; rfl = 0; halted = 0; icount = 0; g_badop = 0; reg[4] = 0x100000; cr0 = 0; cr2 = 0; cr3 = 0; cr4 = 0; cr8 = 0; g_cs = 0x08; g_ss = 0x10; idtr_base = 0; idtr_limit = 0; gdtr_base = 0; gdtr_limit = 0; tsc = 0;
+  I64 i; TimeRst; KbdRst; for (i = 0; i < 16; i++) reg[i] = 0; rip = 0; rfl = 0; halted = 0; icount = 0; g_badop = 0; reg[4] = 0x100000; cr0 = 0; cr2 = 0; cr3 = 0; cr4 = 0; cr8 = 0; g_cs = 0x08; g_ss = 0x10; idtr_base = 0; idtr_limit = 0; gdtr_base = 0; gdtr_limit = 0; tsc = 0;
   for (i = 0; i < 16; i++) { xmm_lo[i] = 0; xmm_hi[i] = 0; }
   pic1_base = 0; pic1_mask = 0xFF; pic1_irr = 0; pic1_isr = 0; pic1_initstep = 0; pic2_base = 0; pic2_mask = 0xFF; pic2_irr = 0; pic2_isr = 0; pic2_initstep = 0; pit_reload = 0; pit_div = 0; pit_counter = 0; pit_wlo = 1; }
 U0 Load(U8 *p, I64 n, U64 at) { I64 i; for (i = 0; i < n; i++) mem[at + i] = p[i]; rip = at; }
