@@ -1,5 +1,5 @@
 U0 AtomFault()
-{//Retain unsupported LOCK operands; no non-atomic fallback is safe.
+{//Retain unsupported atomic operands without a partial update.
   g_badop=0xF0;
   halted=2;
 }
@@ -275,6 +275,30 @@ U0 RmCmpXchg8B()
     reg[2]=old>>32;
   }
   if (lockf) AtomEnd(addr,8);
+}
+
+U0 RmCmpXchg16B()
+{//An aligned pair still needs exclusive ownership when LOCK is used.
+  I64 addr;
+  U64 lo,hi;
+  Bool owner=lockf && g_ncore>1;
+  if (!isMem || rg&7!=1 || ea&15) {AtomFault;return;}
+  addr=AtomAddr(16);
+  if (addr<0) return;
+  if (owner && (!(1<g_ncore<=NCORES) || !__bus_lock)) {
+    AtomFault;
+    return;
+  }
+  lo=RdMem(addr,8);hi=RdMem(addr+8,8);
+  rfl&=~F_ZF;
+  if (lo==reg[0] && hi==reg[2]) {
+    lo=reg[3];hi=reg[1];
+    rfl|=F_ZF;
+  } else {
+    reg[0]=lo;reg[2]=hi;
+  }
+  WrMem(addr,8,lo);WrMem(addr+8,8,hi);
+  if (owner) __bus_unlock;
 }
 
 U0 DoBit(I64 op,U64 bit,I64 size)

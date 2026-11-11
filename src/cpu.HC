@@ -312,7 +312,11 @@ U0 Op0F()
     case 0xB1: DecodeModRM; RmCmpXchg(sz); break;
     case 0xC0: DecodeModRM; RmXadd(1); break;
     case 0xC1: DecodeModRM; RmXadd(sz); break;
-    case 0xC7: DecodeModRM; RmCmpXchg8B; break;
+    case 0xC7:
+      DecodeModRM;
+      if (rexW) RmCmpXchg16B;
+      else RmCmpXchg8B;
+      break;
     case 0xC3: DecodeModRM(); WrRM(sz, RdReg(rg, sz)); break;                    // MOVNTI r/m,r
     case 0xA4: DecodeModRM(); DoShld(1, RdReg(rg, sz), Fetch8(), sz); break;     // SHLD r/m,r,imm8
     case 0xA5: DecodeModRM(); DoShld(1, RdReg(rg, sz), RdReg(1, 1), sz); break;  // SHLD r/m,r,CL

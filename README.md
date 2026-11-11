@@ -113,8 +113,9 @@ runs one core per host thread over shared memory and has separate worker/barrier
 regressions. Browser networking for TOOM multiplayer is not implemented.
 
 `src/Atom.HC` owns memory read/modify/write operations, including implicit-lock
-XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG/8B and bit changes.
-Aligned RAM and the TempleOS RAM alias use sequentially consistent host atomics.
+XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG/8B/16B and bit changes.
+Aligned operands up to eight bytes, including the TempleOS RAM alias, use
+sequentially consistent host atomics.
 An unaligned 16/32-bit field contained within one 64-bit word uses masked CAS,
 preserving simultaneous writes to neighboring fields. With exactly one guest
 core, valid cross-word RAM operands complete within one synchronous instruction,
@@ -122,12 +123,23 @@ without IRQ delivery or a host callback between reading and writing. Original
 TempleOS provides 516 split-field witnesses, including cache-line crossings;
 387 also match a separate physical-host probe. Multi-core cross-word operands
 require the host's opt-in shared-RAM ownership protocol; uncoordinated hosts,
-MMIO and invalid LOCK forms retain a fault without writes. CMPXCHG16B and
-architectural delivery of these unsupported-operand
-faults remain unimplemented. Four-worker
+MMIO and invalid LOCK forms retain a fault without writes. Architectural
+delivery of these unsupported-operand faults remains unimplemented. Four-worker
 contention tests and an independent x86-64 hardware oracle cover arithmetic,
 defined flags and register writeback; logical operations set undefined AF to
 zero consistently in both interpreter and JIT.
+
+CMPXCHG16B supports complete, 16-byte-aligned RAM operands and the RAM alias.
+It compares RDX:RAX, stores RCX:RBX on success, loads the old pair on failure,
+and changes only ZF. Both halves receive a write cycle even on failure. A
+locked multi-core operation requires the same exclusive shared-RAM protocol
+even though its address is aligned; unregistered hosts refuse before the read.
+Unlocked operations do not promise atomicity. Misaligned, out-of-range, MMIO
+and invalid register forms retain a stopped diagnostic without operand writes;
+architectural #GP/#UD/#PF delivery and guest page protection remain open.
+Physical and original TempleOS vectors, a forced half-write overlap and actual
+four-core guest counter loops cover this bounded path. CPUID keeps CX16 clear
+because this is not the complete protected-memory/fault-delivery contract.
 
 `CpuId.HC` defines a conservative virtual CPU instead of copying the host's
 capabilities. Leaf 0 reports `GenuineIntel` and basic maximum 1. Leaf 1 retains
