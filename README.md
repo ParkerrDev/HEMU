@@ -180,6 +180,16 @@ of silently succeeding; 80-bit memory operands are explicitly rejected.
 Transcendental results use host math and can differ from native
 x87 near integer pixel/texture boundaries.
 
+The emulator classifies binary64 NaNs and both signed zeros from their bits.
+Native HolyC equality compares representations and its floating truth test
+regards negative zero as nonzero, so those language operators cannot implement
+CPU numeric equality or unordered detection. Integer-store range checks also
+use sign and magnitude bits before conversion. The FPU module is compiled by
+original V5.03 and both old/new WASM comparison implementations in the source
+fixture. Physical COMISD/UCOMISD witnesses cover operand preservation and
+ZF/PF/CF plus clearing OF/SF/AF; complete MXCSR exception handling is not
+implemented by that comparison path.
+
 These checks cover observed workloads and regressions, not complete x86 hardware conformance or complete
 game playthroughs.
 

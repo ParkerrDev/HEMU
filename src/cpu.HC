@@ -277,8 +277,17 @@ U0 Op0F()
     case 0x5E: DecodeModRM(); xmm_lo[rg] = F64ToBits(BitsToF64(xmm_lo[rg]) / BitsToF64(RdXmm64())); break;                            // DIVSD
     case 0x5D: DecodeModRM(); fx = BitsToF64(xmm_lo[rg]); fy = BitsToF64(RdXmm64()); if (fy < fx) xmm_lo[rg] = F64ToBits(fy); break;  // MINSD
     case 0x5F: DecodeModRM(); fx = BitsToF64(xmm_lo[rg]); fy = BitsToF64(RdXmm64()); if (fy > fx) xmm_lo[rg] = F64ToBits(fy); break;  // MAXSD
-    case 0x2E: case 0x2F: DecodeModRM();                                  // UCOMISD/COMISD -> EFLAGS
-      fx = BitsToF64(xmm_lo[rg]); fy = BitsToF64(RdXmm64()); rfl &= ~(F_ZF | F_PF | F_CF | F_SF | F_OF); if (fx != fx || fy != fy) rfl |= (F_ZF | F_PF | F_CF); else if (fx == fy) rfl |= F_ZF; else if (fx < fy) rfl |= F_CF;
+    case 0x2E: //UCOMISD/COMISD -> EFLAGS.
+    case 0x2F:
+      DecodeModRM();
+      fx=BitsToF64(xmm_lo[rg]);fy=BitsToF64(RdXmm64());
+      rfl&=~(F_ZF|F_PF|F_CF|F_SF|F_OF|F_AF);
+      if (F64NaN(fx) || F64NaN(fy))
+	rfl|=F_ZF|F_PF|F_CF;
+      else if (F64Eq(fx,fy))
+	rfl|=F_ZF;
+      else if (fx<fy)
+	rfl|=F_CF;
       break;
     case 0x57: case 0xEF: DecodeModRM();                                  // XORPS/XORPD / PXOR (128)
       if (isMem) { xmm_lo[rg] ^= RdMem(ea, 8); xmm_hi[rg] ^= RdMem(ea + 8, 8); } else { xmm_lo[rg] ^= xmm_lo[rm]; xmm_hi[rg] ^= xmm_hi[rm]; }

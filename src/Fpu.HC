@@ -16,10 +16,24 @@ F64 IntToF64(I64 value)
   return ToF64(value);
 }
 
+Bool F64NaN(F64 value)
+{//Classify the bits; native HolyC equality compares the representation.
+  return value(U64)&0x7FFFFFFFFFFFFFFF>0x7FF0000000000000;
+}
+
+Bool F64Eq(F64 arg1,F64 arg2)
+{//Numeric equality identifies both zeros, and never a NaN.
+  U64 bits1=arg1(U64),bits2=arg2(U64),
+	mag1=bits1&0x7FFFFFFFFFFFFFFF,mag2=bits2&0x7FFFFFFFFFFFFFFF;
+  return mag1<=0x7FF0000000000000 && mag2<=0x7FF0000000000000 &&
+	(bits1==bits2 || !mag1 && !mag2);
+}
+
 I64 F64ToInt(F64 value)
 {//An invalid signed conversion returns integer indefinite.
-  if (!(value>=-0x43E0000000000000(F64) &&
-	value<0x43E0000000000000(F64)))
+  U64 bits=value(U64),mag=bits&0x7FFFFFFFFFFFFFFF;
+  if (mag>0x43E0000000000000 ||
+	mag==0x43E0000000000000 && !(bits>>63))
     return -I64_MAX-1;
   return ToI64(value);
 }
@@ -79,8 +93,8 @@ F64 FIntRound(F64 value,I64 mode)
 {//x87 rounding: nearest even, down, up or truncate.
   I64 i;
   F64 res,part;
-  if (value!=value || value>=4503599627370496.0 ||
-	value<=-4503599627370496.0 || !value)
+  U64 mag=value(U64)&0x7FFFFFFFFFFFFFFF;
+  if (mag>=0x4330000000000000 || !mag)
     return value;
   i=value;res=i;
   if (!mode) {
@@ -93,7 +107,7 @@ F64 FIntRound(F64 value,I64 mode)
     res--;
   else if (mode==2 && res<value)
     res++;
-  if (!res)
+  if (!(res(U64)&0x7FFFFFFFFFFFFFFF))
     return (value(U64)&0x8000000000000000)(F64);
   return res;
 }
@@ -106,16 +120,18 @@ I64 RoundCW(F64 value)
 U0 FIntStore(I64 size,Bool trunc,Bool pop)
 {//FIST(P)/FISTTP with the destination's range and masked exception flags.
   I64 mode=x87_cw>>10&3,limit=1<<(size*8-1),res;
-  F64 value=FStv(0),rounded,bound=32768.0;
+  U64 bound=0x40E0000000000000,bits,mag;
+  F64 value=FStv(0),rounded;
   if (trunc)
     mode=3;
   rounded=FIntRound(value,mode);
   if (size==4)
-    bound=2147483648.0;
+    bound=0x41E0000000000000;
   else if (size==8)
-    bound=0x43E0000000000000(F64);
+    bound=0x43E0000000000000;
   x87_sw&=~0x200;
-  if (!(rounded>=-bound && rounded<bound)) {
+  bits=rounded(U64);mag=bits&0x7FFFFFFFFFFFFFFF;
+  if (mag>bound || mag==bound && !(bits>>63)) {
     x87_sw|=1;
     if (!(x87_cw&1)) {
       x87_sw|=0x8080;
@@ -124,7 +140,7 @@ U0 FIntStore(I64 size,Bool trunc,Bool pop)
     res=limit;
   } else {
     res=rounded;
-    if (rounded!=value) {
+    if (!F64Eq(rounded,value)) {
       x87_sw|=0x20;
       if (!trunc && Abs(rounded)>Abs(value))
 	x87_sw|=0x200;
@@ -138,11 +154,11 @@ U0 FIntStore(I64 size,Bool trunc,Bool pop)
 U0 FCmpSW(F64 arg1,F64 arg2)
 {//FCOM condition bits C3/C2/C0.
   x87_sw&=~0x4500;
-  if (arg1!=arg1 || arg2!=arg2)
+  if (F64NaN(arg1) || F64NaN(arg2))
     x87_sw|=0x4500;
   else if (arg1<arg2)
     x87_sw|=0x100;
-  else if (arg1==arg2)
+  else if (F64Eq(arg1,arg2))
     x87_sw|=0x4000;
 }
 
@@ -167,7 +183,7 @@ Bool FCmpFL(F64 arg1,F64 arg2,Bool unordered=FALSE)
   rfl&=~(F_ZF|F_PF|F_CF);
   if (nan)
     rfl|=F_ZF|F_PF|F_CF;
-  else if (arg1==arg2)
+  else if (F64Eq(arg1,arg2))
     rfl|=F_ZF;
   else if (arg1<arg2)
     rfl|=F_CF;
@@ -351,7 +367,7 @@ Bool FpuMath(I64 sub,I64 op)
 	break;
       case 4: //FXTRACT.
 	arg1=FStv(0);
-	if (!arg1) {
+	if (!(arg1(U64)&0x7FFFFFFFFFFFFFFF)) {
 	  FStset(0,0.0);FPush(0.0);
 	} else {
 	  arg2=arg1;
