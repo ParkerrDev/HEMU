@@ -500,7 +500,7 @@ F64 IntToF64(I64 v)  { F64 d; d = v; return d; }                // signed int ->
 I64 F64ToInt(F64 d)
 {//An invalid signed conversion returns integer indefinite.
   I64 res;
-  if (!(d>=-9223372036854775808.0 && d<9223372036854775808.0))
+  if (!(d>=-BitsToF64(0x43E0000000000000) && d<BitsToF64(0x43E0000000000000)))
     return -I64_MAX-1;
   res=d;
   return res;
@@ -540,7 +540,7 @@ U0 FIntStore(I64 size,Bool trunc,Bool pop)
   r=FIntRound(d,rc);
   bound=32768.0;
   if (size==4) bound=2147483648.0;
-  else if (size==8) bound=9223372036854775808.0;
+  else if (size==8) bound=BitsToF64(0x43E0000000000000);
   x87_sw&=~0x200;
   if (!(r>=-bound && r<bound)) {
     x87_sw|=1;
