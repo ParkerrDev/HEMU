@@ -24,18 +24,13 @@ U0 InitMem(U64 sz)
 // slot). SHARED state (mem, devices, JIT cache, clocks, cr*, idtr/gdtr) stays below.
 U64 g_hle_blit;                      // entry addr of the transparent compositor blit to run natively (0=off)
 U8 *g_desk;                          // last COMPLETE frame (desktop + the OS's own cursor), captured tear-free
-I64 g_desk_ready,g_desk_seq,g_present_seq; U64 g_capture_rip;
-U64 g_skip_c4, g_skip_vga, g_skip_xlat;  // DEAD dc2->VGA output paths (hemu presents dc2 directly, so the OS's
-                                     // dc2->VGA color/planar conversion produces nothing we use): DCBlotColor4
-                                     // (4 args), GrUpdateVGAGraphics (0 args), the XLAT palette scanline blit (4 args)
+I64 g_desk_ready,g_desk_seq,g_present_seq; U64 g_capture_rip,g_capture_text;
 U64 g_jit_on;                        // 0 = pure interpreter (zero-init; a JIT host sets it 1 after wiring __jit_*).
 U64 g_jit_rip[65536];                // direct-mapped block cache: the rip occupying slot ((rip^(rip>>16)) & 0xFFFF)
                                      // (hash, not plain low bits: game code copies sit 0x40000/0xA0000 apart ->
                                      // same low 16 bits for EVERY corresponding block -> permanent slot ping-pong)
 I64 g_jit_n[65536];                  // that block's instr count (>0 = JIT'd), 0 = tried+unjittable, -1 = still counting
 I64 g_jit_hot[65536];                // per-slot hotness counter until the compile threshold (64)
-                                     // planar path. We present dc2 directly, so this output is dead - skip both
-                                     // function bodies (just pop args + return) to refresh faster -> smoother cursor.
 U8 g_hooktbl[65536];                 // rip&0xFFFF -> "maybe a special address" gate: lets Step() skip the four
                                      // 64-bit hook compares for the ~98% of instructions that aren't at one.
                                      // 16-bit (was 8-bit): an 8-bit gate forced every hot fn sharing a hook's
@@ -864,9 +859,11 @@ U0 CaptureFrom(U64 bd)
   }
 }
 
+#include "video.HC"
+
 U0 CaptureDesk()
-{//gr.dc2's body, once GrUpdateScrn has drawn it all, mouse included.
-  CaptureFrom(RdMem(RdMem(guest.gr_dc2,8)+of_dc.body,8));
+{//Capture after GrUpdateVGAGraphics has committed the OS screen image.
+  VideoCapture;
 }
 
 U64 g_raster_hle[2],g_poly3_hle,g_dc_transform;
@@ -1003,6 +1000,7 @@ I64 RasterHLE()
 {//The named guest primitives share one span filler.
   U64 dc;
   I64 vert,x1,x2,y,z1,z2,res;
+  if (VideoHLE) return 1;
   if (g_poly3_hle && rip==g_poly3_hle)
     return GrPoly3HLE;
   if (g_raster_n!=2)
@@ -1037,13 +1035,12 @@ U0 Step()
 
   if (g_hooktbl[rip & 0xFFFF]) {                   // gate: only ~1.5% of rips need the four hook compares
     if (rip == g_ctr_rip && g_ctr_rip) g_ctr_n++;  // diag execution counter (0 = off)
-    if (g_raster_n || g_poly3_hle)
-      if (RasterHLE) return;
+    if (RasterHLE) return;
     if (rip == g_hle_blit) { HleBlit(); return; }   // native fast-path for the dominant compositor blit
+    if (rip==g_capture_text)
+      CaptureFrom(GuestU64(GuestU64(guest.gr_dc2)+of_dc.body));
     if (rip == g_capture_rip) CaptureDesk();        // grab the finished frame (incl. native cursor) tear-free
-    if (rip == g_skip_c4)  { rip = RdMem(reg[4], 8); reg[4] += 8 + 32; return; }  // skip DCBlotColor4 (4 args)
-    if (rip == g_skip_vga) { rip = RdMem(reg[4], 8); reg[4] += 8;      return; }  // skip GrUpdateVGAGraphics
-    if (rip == g_skip_xlat){ rip = RdMem(reg[4], 8); reg[4] += 8 + 32; return; }  // skip XLAT palette convert (4 args)
+
   }
   pfx66 = 0; repf = 0; hasRex = 0; rexW = 0; rexR = 0; rexX = 0; rexB = 0; g_segbase = 0; lockf = 0; op = mem[rip]; rip++;
   while (g_pfx[op]) {                                  // legacy prefixes (one table lookup, not 11 compares)
