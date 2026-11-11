@@ -1,7 +1,12 @@
 #include "cpu.HC"
 
 I64 g_pass, g_fail, g_total;
-U0 Go(I64 maxi) { Run(maxi); g_total += icount; }
+U0 Go(I64 maxi)
+{//HLT spends a time budget without executing x86 instructions.
+  I64 start=icount,idle=time_idle;
+  Run(maxi);
+  g_total+=icount-start-(time_idle-idle);
+}
 // Call a real compiled function: arg in RDI (System V), return in RAX, runs to a
 // sentinel HLT placed at the pushed return address.
 U0 RunFunc(U8 *p, I64 n, U64 arg, U64 at)
@@ -128,7 +133,7 @@ U0 Main()
   mem[0x6008]=0xB0; mem[0x6009]=0x20; mem[0x600A]=0xE6; mem[0x600B]=0x20;   // mov al,0x20; out 0x20,al (EOI)
   mem[0x600C]=0x48; mem[0x600D]=0xCF;                                       // iretq
   WrMem(0x7000, 8, 0);
-  mem[0x1000]=0xFB; mem[0x1001]=0xEB; mem[0x1002]=0xFE;                     // sti; jmp $
+  mem[0x1000]=0xFB; mem[0x1001]=0xEB; mem[0x1002]=0xFE;                     //sti; jmp $$
   rip = 0x1000;
   IoOut(0x20,0x11); IoOut(0x21,0x20); IoOut(0x21,0x04); IoOut(0x21,0x01); IoOut(0x21,0xFE);  // PIC1: vec base 0x20, unmask IRQ0
   IoOut(0x43,0x34); IoOut(0x40,100); IoOut(0x40,0);                        // PIT ch0: reload 100

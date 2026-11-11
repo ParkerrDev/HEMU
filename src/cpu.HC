@@ -138,7 +138,7 @@ U0 Grp3(I64 sz)
     if (d == 6 && hi == 0) { reg[0] = lo / a; reg[2] = lo % a; return; }
     if (d == 7) { sl = lo; sa = a; reg[0] = sl / sa; reg[2] = sl % sa; return; }  // IDIV (64-bit-fits)
     q = 0; rem = 0;
-    for (bit = 127; bit >= 0; bit--) { rem = rem << 1; if (bit >= 64) bv = (hi >> (bit - 64)) & 1; else bv = (lo >> bit) & 1; rem |= bv; if (rem >= a) { rem -= a; q |= (U64)1 << bit; } }
+    for (bit = 127; bit >= 0; bit--) { rem = rem << 1; if (bit >= 64) bv = (hi >> (bit - 64)) & 1; else bv = (lo >> bit) & 1; rem |= bv; if (rem >= a) { rem -= a; q |= 1(U64)<<bit; } }
     reg[0] = q; reg[2] = rem;
   } else {
     hi = RdReg(2, sz); lo = RdReg(0, sz);
@@ -158,7 +158,7 @@ U0 StrStep(I64 op, I64 sz)
 }
 U0 DoStr(I64 op, I64 sz)
 {
-  I64 cmpkind; U64 n, total, i;
+  I64 cmpkind; U64 n,total,i,s,dt,val;
   cmpkind = (op == 0xA6 || op == 0xA7 || op == 0xAE || op == 0xAF);   // SCAS/CMPS terminate on ZF
   if (!repf) { StrStep(op, sz); return; }
   // Bulk fast path for REP MOVS/STOS (forward, flat) - TempleOS's MemCpy/MemSet are REP MOVSQ/STOSQ
@@ -167,10 +167,10 @@ U0 DoStr(I64 op, I64 sz)
   if (g_segbase == 0 && !(rfl & F_DF) && reg[1] > 0) {
     n = reg[1]; total = n * sz;
     if (op == 0xA4 || op == 0xA5) {                                   // REP MOVS: copy RSI -> RDI
-      U64 s = reg[6], dt = reg[7];
+      s=reg[6];dt=reg[7];
       if (s + total <= mem_size && dt + total <= mem_size) { if (sz == 8) for (i = 0; i < n; i++) *(mem + dt + i * 8)(U64*) = *(mem + s + i * 8)(U64*); else         for (i = 0; i < total; i++) mem[dt + i] = mem[s + i]; reg[6] = s + total; reg[7] = dt + total; reg[1] = 0; return; }
     } else if (op == 0xAA || op == 0xAB) {                            // REP STOS: fill RDI with AL/AX/EAX/RAX
-      U64 dt = reg[7], val = RdReg(0, sz);
+      dt=reg[7];val=RdReg(0,sz);
       if (dt + total <= mem_size) { if      (sz == 8) for (i = 0; i < n; i++) *(mem + dt + i * 8)(U64*) = val; else if (sz == 1) for (i = 0; i < total; i++) mem[dt + i] = val; else              for (i = 0; i < n; i++) WrMem(dt + i * sz, sz, val); reg[7] = dt + total; reg[1] = 0; return; } } }
   while (reg[1] != 0) {
     StrStep(op, sz); reg[1]--;
@@ -201,11 +201,6 @@ U0 DoIns(I64 sz)                                          // INS: [RDI] <- port 
 { I64 d; if (rfl & F_DF) d = -sz; else d = sz; if (!repf) { WrMem(reg[7], sz, IoInWidth(reg[2] & 0xFFFF, sz)); reg[7] += d; return; } while (reg[1] != 0) { WrMem(reg[7], sz, IoInWidth(reg[2] & 0xFFFF, sz)); reg[7] += d; reg[1]--; } }
 U0 DoOuts(I64 sz)                                         // OUTS: port DX <- [RSI]
 { I64 d; if (rfl & F_DF) d = -sz; else d = sz; if (!repf) { IoOutWidth(reg[2] & 0xFFFF, RdMem(reg[6], sz), sz); reg[6] += d; return; } while (reg[1] != 0) { IoOutWidth(reg[2] & 0xFFFF, RdMem(reg[6], sz), sz); reg[6] += d; reg[1]--; } }
-U0 CheckIrq()
-{
-  I64 vec=PicNext;
-  if (vec>=0) DoInt(vec,0,0);
-}
 U0 Grp7()                                         // 0F 01 /digit: LGDT/LIDT/SGDT/SIDT
 {
   I64 d = rg & 7; if (!isMem) return;
@@ -219,6 +214,12 @@ U0 DoInt(I64 vec, I64 hasErr, U64 err)            // long-mode interrupt: push f
   reg[4] -= 8; WrMem(reg[4], 8, g_cs); reg[4] -= 8; WrMem(reg[4], 8, rip);
   if (hasErr) { reg[4] -= 8; WrMem(reg[4], 8, err); }
   rfl &= ~F_IF; g_cs = sel; rip = off; }
+U0 CheckIrq()
+{
+  I64 vec=PicNext;
+  if (vec>=0) DoInt(vec,0,0);
+}
+
 U0 DoIret()                                       // IRETQ: pop RIP, CS, RFLAGS, RSP, SS
 { U64 newsp; rip   = RdMem(reg[4] + 0, 8); g_cs  = RdMem(reg[4] + 8, 8); rfl   = RdMem(reg[4] + 16, 8); newsp = RdMem(reg[4] + 24, 8); g_ss  = RdMem(reg[4] + 32, 8); reg[4] = newsp; }
 
@@ -384,8 +385,7 @@ U0 HleBlit()
   U64 ret=RdMem(reg[4],8),dst_dc=RdMem(reg[4]+8,8),src_dc=RdMem(reg[4]+16,8),
 	sb=RdMem(src_dc+of_dc.body,8),db=RdMem(dst_dc+of_dc.body,8);
   I64 w=RdMem(src_dc+of_dc.width_internal,4)&0xFFFF,
-	h=RdMem(src_dc+of_dc.height,4)&0xFFFF,n=w*h,i;
-  U8 v;
+	h=RdMem(src_dc+of_dc.height,4)&0xFFFF,n=w*h,i,v;
   if (sb && db && sb<mem_size && db<mem_size && n>0 && sb+n<=mem_size &&
 	  db+n<=mem_size)
     for (i=0;i<n;i++) {
@@ -612,9 +612,9 @@ U0 Step()
 
   // hot-path: MOV dominates render/blit loops - handle before the long opcode switch (RdRM/WrRM inlined)
   if (op == 0x89) { DecodeModRM(); if (isMem) WrMem(ea, sz, RdReg(rg, sz)); else WrReg(rm, sz, RdReg(rg, sz)); return; }  // MOV r/m, r
-  if (op == 0x8B) { DecodeModRM(); WrReg(rg, sz, isMem ? RdMem(ea, sz) : RdReg(rm, sz)); return; }                        // MOV r, r/m
+  if (op == 0x8B) { DecodeModRM(); if (isMem) a=RdMem(ea,sz); else a=RdReg(rm,sz); WrReg(rg,sz,a); return; }                        // MOV r, r/m
   if (op == 0x88) { DecodeModRM(); if (isMem) WrMem(ea, 1, RdReg(rg, 1)); else WrReg(rm, 1, RdReg(rg, 1)); return; }      // MOV r/m8, r8
-  if (op == 0x8A) { DecodeModRM(); WrReg(rg, 1, isMem ? RdMem(ea, 1) : RdReg(rm, 1)); return; }                          // MOV r8, r/m8
+  if (op == 0x8A) { DecodeModRM(); if (isMem) a=RdMem(ea,1); else a=RdReg(rm,1); WrReg(rg,1,a); return; }                          // MOV r8, r/m8
 
   switch (op) {
     case 0x90: break;
@@ -644,10 +644,6 @@ U0 Step()
     case 0xA8: b = Fetch8();     SetLogic((RdReg(0, 1) & b) & 0xFF, 1); break;       // TEST AL, imm8
     case 0xA9: b = FetchImm(sz); SetLogic((RdReg(0, sz) & b) & SizeMask(sz), sz); break; // TEST eAX, imm
 
-    case 0x88: DecodeModRM(); WrRM(1, RdReg(rg, 1)); break;       // MOV r/m8, r8
-    case 0x8A: DecodeModRM(); WrReg(rg, 1, RdRM(1)); break;       // MOV r8, r/m8
-    case 0x89: DecodeModRM(); WrRM(sz, RdReg(rg, sz)); break;     // MOV r/m, r
-    case 0x8B: DecodeModRM(); WrReg(rg, sz, RdRM(sz)); break;     // MOV r, r/m
     case 0x86: DecodeModRM();                                                                       // XCHG r/m8, r8 (mem form is implicitly LOCKed)
                if (isMem && ea < mem_size) imm = AtomXchg(ea, RdReg(rg, 1), 1);
                else { imm = RdRM(1); WrRM(1, RdReg(rg, 1)); } WrReg(rg, 1, imm); break;
@@ -657,10 +653,9 @@ U0 Step()
     case 0x8E: DecodeModRM(); g_seg[rg & 7] = RdRM(2); break;     // MOV Sreg, r/m16 - selector stored, ignored (flat)
     case 0x8C: DecodeModRM(); WrRM(2, g_seg[rg & 7]); break;      // MOV r/m16, Sreg
     case 0xC6: DecodeModRM(1); WrRM(1, Fetch8()); break;          // MOV r/m8, imm8
-    case 0xC7: DecodeModRM(sz == 2 ? 2 : 4); imm = FetchImm(sz); WrRM(sz, imm); break;  // MOV r/m, imm (imm16 w/ 0x66, else imm32)
+    case 0xC7: d=4; if (sz==2) d=2; DecodeModRM(d); imm = FetchImm(sz); WrRM(sz, imm); break;  // MOV r/m, imm (imm16 w/ 0x66, else imm32)
     case 0x8D: DecodeModRM(); WrReg(rg, sz, ea); break;          // LEA
     case 0x63: DecodeModRM(); WrReg(rg, sz, SignExtTo64(RdRM(4), 4)); break;     // MOVSXD r64, r/m32
-    case 0x87: DecodeModRM(); a = RdRM(sz); WrRM(sz, RdReg(rg, sz)); WrReg(rg, sz, a); break;  // XCHG r/m, r
     case 0x91: case 0x92: case 0x93: case 0x94: case 0x95: case 0x96: case 0x97:  // XCHG eAX, r
       r2 = (op - 0x90) | (rexB << 3); a = reg[0]; b = RdReg(r2, sz); WrReg(0, sz, b); WrReg(r2, sz, a); break;
     case 0x98:                                                                    // CBW / CWDE / CDQE
@@ -691,8 +686,8 @@ U0 Step()
 
     // grp3: only TEST (reg field 0/1) has a trailing immediate, so RIP-relative EA must skip it.
     // Peek the ModRM reg field before decoding to pass the right immlen (else EA lands short).
-    case 0xF6: DecodeModRM(((mem[rip] >> 3) & 7) <= 1 ? 1 : 0); Grp3(1);  break;
-    case 0xF7: DecodeModRM(((mem[rip] >> 3) & 7) <= 1 ? (sz == 2 ? 2 : 4) : 0); Grp3(sz); break;
+    case 0xF6: d=0; if (mem[rip]>>3&7<=1) d=1; DecodeModRM(d); Grp3(1);  break;
+    case 0xF7: d=0; if (mem[rip]>>3&7<=1) {d=4; if (sz==2) d=2;} DecodeModRM(d); Grp3(sz); break;
 
     case 0xFE: DecodeModRM();                                                       // grp4: INC/DEC r/m8
       if ((rg & 7) == 0) { cf = rfl & F_CF; a = RdRM(1); r = a + 1; WrRM(1, r); SetAdd(a, 1, r, 1); rfl = (rfl & ~F_CF) | cf; }
@@ -717,9 +712,9 @@ U0 Step()
                else { if (reg[0] & 0x80000000) WrReg(2, 4, 0xFFFFFFFF); else WrReg(2, 4, 0); } break; // CDQ
 
     case 0x6C: DoIns(1); break;                   // INSB  [RDI] <- DX
-    case 0x6D: DoIns(sz == 2 ? 2 : 4); break;     // INSW/INSD (ATA PIO sector reads land here)
+    case 0x6D: d=4; if (sz==2) d=2; DoIns(d); break;     // INSW/INSD (ATA PIO sector reads land here)
     case 0x6E: DoOuts(1); break;                  // OUTSB DX <- [RSI]
-    case 0x6F: DoOuts(sz == 2 ? 2 : 4); break;    // OUTSW/OUTSD
+    case 0x6F: d=4; if (sz==2) d=2; DoOuts(d); break;    // OUTSW/OUTSD
     case 0xA4: DoStr(0xA4, 1);  break;
     case 0xA5: DoStr(0xA5, sz); break;
     case 0xAA: DoStr(0xAA, 1);  break;
