@@ -22,39 +22,13 @@ U8 g_hooktbl[65536];                 // rip&0xFFFF -> "maybe a special address" 
                                      // 64-bit hook compares for the ~98% of instructions that aren't at one.
                                      // 16-bit (was 8-bit): an 8-bit gate forced every hot fn sharing a hook's
                                      // low byte to stay interp'd -> never JIT'd (was 48% of all chain-breaks).
-U64 ata_words, ata_seccnt, ata_pos, ata_r3, ata_r4, ata_r5;   // ATA PIO read - serve C: sectors (disk == live.bin)
-U64 ata_wr, ata_wlba, ata_wcnt;                              // ATA PIO write in progress (lba, count) -> __host_disk_wr
-U8 *ata_buf;
 U64 g_badop;
 // system state: control regs, descriptor tables, MSRs, TSC, code/stack segments
 U64 cr0, cr2, cr3, cr4, cr8, g_cs, g_ss; U64 idtr_base, idtr_limit, gdtr_base, gdtr_limit;
 U64 msr_efer, msr_star, msr_lstar, msr_sfmask, msr_kgsbase, msr_apic;   // msr_fsbase/msr_gsbase moved into CCpuState (per-core)
 U64 g_xmm_lo[NCORES][16], g_xmm_hi[NCORES][16];   // SSE XMM registers - PER-CORE (xmm_lo/xmm_hi #defines in core.HC): an AP suspended mid-XMM must not be clobbered by another core
 I64 g_lockf[NCORES];                  // PER-CORE: 1 = the current instruction had a 0xF0 LOCK prefix (lockf #define in core.HC) - makes the RMW atomic on shared memory
-// devices: dual 8259 PICs + 8254 PIT (channel 0 -> IRQ0 = the scheduler tick)
-I64 pic1_base, pic1_mask, pic1_irr, pic1_isr, pic1_initstep; I64 pic2_base, pic2_mask, pic2_irr, pic2_isr, pic2_initstep;
-#include "time.HC"
-I64 irq_count;                       // # of hardware IRQs delivered (instrumentation)
-// CMOS RTC (ports 0x70/0x71): TempleOS reads wall-clock time here; tS/Now() and
-// many task timeouts derive from it, so it must ADVANCE or the desktop never wakes.
-I64 rtc_idx;                         // selected CMOS register (last OUT 0x70)
-U64 rtc_base_sec;                    // seconds-of-day at snapshot; + elapsed below
-I64 rtc_dow, rtc_day, rtc_mon, rtc_year;
-// PS/2 keyboard (IRQ1, port 0x60) + mouse (IRQ12). Host pushes scancodes/packets here.
-#include "keyboard.HC"
-I64 ms_byte0, ms_byte1, ms_byte2, ms_has, ms_phase;   // pending PS/2 mouse 3-byte packet
-// PS/2 controller command-response FIFO (polled by KbdCmdRead during mouse/kbd install + config).
-// Without this the mouse install (MsHardRst) never gets its 0xFA ACKs, ms_hard.install_in_progress
-// stays TRUE, and IRQKbd bails on every keystroke (Mouse.HC) -> keyboard is dead.
-I64 ps2q[16], ps2q_ms[16], ps2qh, ps2qt, ms_next, cfg_next;
-U0 Ps2Resp(I64 b, I64 isms) { ps2q[ps2qt & 15] = b; ps2q_ms[ps2qt & 15] = isms; ps2qt++; }
-// PC speaker: PIT channel 2 (ports 0x42/0x43) sets the tone; port 0x61 bits0,1 gate it.
-I64 pit2_reload, pit2_div, pit2_wlo, spk_on;
-U0 UpdateSpk()
-{ if (spk_on && pit2_div) __snd(1193182.0 / pit2_div); else __snd(0.0); }
-// MMIO: any guest access at/above mem_size goes here. LAPIC/HPET/IOAPIC live high
-// in the physical map and are NOT in the RAM snapshot, so we emulate the few
-// registers TempleOS reads and swallow the rest (instead of trapping out-of-bounds).
+#include "Dev"
 
 #define F_CF 0x0001
 #define F_PF 0x0004
@@ -77,7 +51,7 @@ U0 InitMem(U64 sz)
   g_pfx[0x36]=1;g_pfx[0x3E]=1;g_pfx[0x26]=1;
   g_pfx[0x64]=1;g_pfx[0x65]=1;
   g_desk=MAlloc(640*480);
-  ata_buf=MAlloc(256*512);
+  DevInit;
 }
 
 #include "Mem"
@@ -221,166 +195,17 @@ U0 Cpuid()  // enough feature bits for TempleOS: FPU/TSC/MSR/PAE/APIC/MMX/FXSR/S
   else if (a == 0x80000000)   { reg[0] = 0x80000008; reg[1] = 0; reg[2] = 0; reg[3] = 0; }
   else if (a == 0x80000001)   { reg[0] = 0; reg[1] = 0; reg[2] = 0x00000001; reg[3] = 0x28100800; }
   else                        { reg[0] = 0; reg[1] = 0; reg[2] = 0; reg[3] = 0; } }
-// VGA DAC state. Palette reads are used by TOOM's 256-color to 16-color dithering.
-U8 vga_dac[768];
-I64 vga_read_pos,vga_write_pos;
-U0 VgaPaletteSend(I64 i)
-{//All hosts receive the same eight-bit RGB palette on boot and restore.
-  I64 r=vga_dac[i*3]*255/63,g=vga_dac[i*3+1]*255/63,
-	b=vga_dac[i*3+2]*255/63;
-  __host_palette(i,r*0x10000+g*0x100+b);
-}
-
-U0 VgaPaletteInit()
-{
-  I64 i,r,g,b,bright;
-  for(i=0;i<16;i++) {
-    bright=(i&8)!=0;
-    r=((i&4)!=0)*42+bright*21;g=((i&2)!=0)*42+bright*21;b=((i&1)!=0)*42+bright*21;
-    if(i==6)g=21;
-    vga_dac[i*3]=r;vga_dac[i*3+1]=g;vga_dac[i*3+2]=b;
-    VgaPaletteSend(i);
-  }
-  vga_read_pos=0;vga_write_pos=0;
-}
-U64 RtcRead(I64 idx)                  // CMOS RTC register read (binary mode, host wall clock)
-{ if (idx == 0x0A) return 0; if (idx == 0x0B) return 0x06; return __host_time(idx); }
-U64 IoIn(U64 port)
-{
-  if(port==0x3C9){U64 value=vga_dac[vga_read_pos];vga_read_pos=(vga_read_pos+1)%768;return value;}
-  if(port==0x3C8)return vga_write_pos/3;
-  if(port==0x3C6)return 255;
-  if (port == 0x21) return pic1_mask; if (port == 0xA1) return pic2_mask; if (port == 0x40) return PitRead; if (port == 0x71) return RtcRead(rtc_idx);
-  if (port == 0x60) {                                  // PS/2 data: cmd-response, then mouse, then kbd
-    if (ps2qh != ps2qt) { I64 b = ps2q[ps2qh & 15]; ps2qh++; return b; }  // command ACK/reset bytes
-    if (ms_has) {
-      I64 mb; if (ms_phase == 0) mb = ms_byte0; else if (ms_phase == 1) mb = ms_byte1; else mb = ms_byte2; ms_phase++;
-      if (ms_phase >= 3) { ms_has = 0; ms_phase = 0; }  // packet drained
-      else pic2_irr |= 0x10;                            // a real PS/2 mouse raises IRQ12 per BYTE:
-      return mb;                                        // TempleOS reads 1 byte/IRQ (Mouse.HC), so
-    }                                                   // re-assert IRQ12 until all 3 bytes are read
-    if (kbd_qh != kbd_qt) { I64 sc = kbd_q[kbd_qh & 63]; kbd_qh++; if (kbd_qh != kbd_qt) pic1_irr |= 2; return sc; }
-    return 0; }
-  if (port == 0x64) {                                  // PS/2 status: bit0=OBF, bit2=sysflag, bit5=mouse-data
-    I64 st = 0x1C, nextms = 0;
-    if (ps2qh != ps2qt) { st |= 0x01; if (ps2q_ms[ps2qh & 15]) nextms = 1; }  // response pending
-    else if (ms_has) { st |= 0x01; nextms = 1; }
-    else if (kbd_qh != kbd_qt) st |= 0x01; if (nextms) st |= 0x20;
-    return st; }
-  if (port == 0x1F7 || port == 0x177) return ata_words > 0 ? 0x48 : 0x40;   // ATA status: DRDY (+DRQ while data left)
-  if (port == 0x1F0 || port == 0x170) {                                     // ATA data: serve staged sector words
-    if (ata_words > 0) { U64 w = *(ata_buf + ata_pos)(U16*); ata_pos += 2; ata_words--; return w; }
-    return 0; }
-  return 0; }
-U0 IoOut(U64 port, U64 v)
-{
-  I64 i;
-  if(port==0x3C7){vga_read_pos=(v&255)*3;return;}
-  if(port==0x3C8){vga_write_pos=(v&255)*3;return;}
-  if(port==0x3C9){i=vga_write_pos/3;vga_dac[vga_write_pos]=v&63;vga_write_pos=(vga_write_pos+1)%768;
-    if(vga_write_pos%3==0 && i<16)VgaPaletteSend(i);return;}
-  if (port >= 0x3B0 && port <= 0x3DF) return;          // VGA registers - framebuffer is HLE'd, ignore (skip the chain)
-  if (port == 0x1F0 || port == 0x170) {                // ATA data port WRITE (16-bit words during a WRITE command)
-    if (ata_wr && ata_words > 0) { *(ata_buf + ata_pos)(U16*) = v; ata_pos += 2; ata_words--;
-      if (ata_words == 0) { __host_disk_wr(ata_wlba, ata_wcnt, ata_buf); ata_wr = 0; } }   // commit to the host overlay
-    return; }
-  v &= 0xFF;
-  if (port == 0x1F2 || port == 0x172) { ata_seccnt = ((ata_seccnt << 8) | v) & 0xFFFF; return; }   // ATA sector count
-  if (port == 0x1F3 || port == 0x173) { ata_r3 = ((ata_r3 << 8) | v) & 0xFFFF; return; }           // LBA48 reg (2 writes)
-  if (port == 0x1F4 || port == 0x174) { ata_r4 = ((ata_r4 << 8) | v) & 0xFFFF; return; }
-  if (port == 0x1F5 || port == 0x175) { ata_r5 = ((ata_r5 << 8) | v) & 0xFFFF; return; }
-  if (port == 0x1F7 || port == 0x177) {                // ATA command (LBA48/28 read+write multiple/sectors)
-    U64 lba = (ata_r3 & 0xFF) | ((ata_r4 & 0xFF) << 8) | ((ata_r5 & 0xFF) << 16)
-            | (((ata_r3 >> 8) & 0xFF) << 24) | (((ata_r4 >> 8) & 0xFF) << 32) | (((ata_r5 >> 8) & 0xFF) << 40);
-    U64 cnt = ata_seccnt & 0xFFFF; if (!cnt) cnt = 256; if (cnt > 256) cnt = 256;
-    if (v == 0x20 || v == 0x21 || v == 0x24 || v == 0x29 || v == 0xC4) {              // READ
-      __host_disk(lba, cnt, ata_buf); ata_words = cnt * 256; ata_pos = 0; ata_wr = 0;   // host stages real sectors
-    } else if (v == 0x30 || v == 0x34 || v == 0x39 || v == 0xC5) {                    // WRITE: receive data, then commit
-      ata_words = cnt * 256; ata_pos = 0; ata_wr = 1; ata_wlba = lba; ata_wcnt = cnt;   // DRQ asserted -> OS sends words
-    } else { ata_words = 0; ata_wr = 0; }
-    ata_r3 = 0; ata_r4 = 0; ata_r5 = 0; ata_seccnt = 0;
-    return; }
-  if (port == 0x64) {                                   // PS/2 controller command
-    if (v == 0xD4) ms_next = 1;                          // next 0x60 byte -> mouse
-    else if (v == 0x20) Ps2Resp(0x47, 0);               // read config (kbd+mouse IRQ + sys flag)
-    else if (v == 0x60) cfg_next = 1;                   // next 0x60 byte = config (no response)
-    else if (v == 0xA9 || v == 0xAB) Ps2Resp(0x00, 0); // interface/self-test -> 0x00 (pass)
-    else if (v == 0xAA) Ps2Resp(0x55, 0);              // controller self-test -> 0x55
-    return;                                             // 0xA7/0xA8/0xAD/0xAE (enable/disable): no reply
-  }
-  if (port == 0x60) {                                   // PS/2 data write
-    if (cfg_next) { cfg_next = 0; return; }              // config byte write
-    if (ms_next) {                                       // a mouse command (after 0xD4)
-      ms_next = 0; Ps2Resp(0xFA, 1);                     // ACK
-      if (v == 0xFF) { Ps2Resp(0xAA, 1); Ps2Resp(0x00, 1); }  // reset -> BAT ok + device id
-      else if (v == 0xF2) Ps2Resp(0x00, 1);             // get-id -> standard mouse
-      return; }
-    Ps2Resp(0xFA, 0);                                   // keyboard command ACK
-    if (kbd_cmd) {
-      if (kbd_cmd==0xF3) {
-        kbd_type=v&0x7F;
-        kbd_repeat_ns=tsc+KbdDelay;
-      }
-      kbd_cmd=0;
-    } else if (v==0xF3 || v==0xED)
-      kbd_cmd=v;
-    else if (v==0xFF) {
-      kbd_repeat_key=0;kbd_type=0x2B;
-      Ps2Resp(0xAA,0);
-    }
-    return; }
-  if (port == 0x70) { rtc_idx = v & 0x7F; return; }     // CMOS register select (bit7 = NMI disable)
-  if (port == 0x43) {                                   // PIT command: bits 6 and 7 pick the channel
-    if ((v & 0xC0) == 0x80) pit2_wlo = 1;
-    else if (!(v & 0xC0)) PitCmd(v);
-    return; }
-  if (port == 0x42) {                                   // PIT ch2 reload (lo then hi) = speaker tone
-    if (pit2_wlo) { pit2_reload = v; pit2_wlo = 0; }
-    else { pit2_reload |= v << 8; pit2_div = pit2_reload; pit2_wlo = 1; UpdateSpk(); }
-    return; }
-  if (port == 0x61) { spk_on = (v & 3) == 3; UpdateSpk(); return; }     // speaker gate (bits 0+1)
-  if (port == 0x20) {                                    // PIC1 command (ICW1 / EOI)
-    if (v & 0x10) pic1_initstep = 1;
-    else if (v == 0x20) { for (i = 0; i < 8; i++) if (pic1_isr & (1 << i)) { pic1_isr &= ~(1 << i); break; } }
-  } else if (port == 0x21) {                             // PIC1 data (ICW2 base / ICW3 / ICW4 / OCW1 mask)
-    if (pic1_initstep == 1) { pic1_base = v; pic1_initstep = 2; }
-    else if (pic1_initstep == 2) pic1_initstep = 3; else if (pic1_initstep == 3) pic1_initstep = 0; else pic1_mask = v;
-  } else if (port == 0xA0) {
-    if (v & 0x10) pic2_initstep = 1;
-    else if (v == 0x20) { for (i = 0; i < 8; i++) if (pic2_isr & (1 << i)) { pic2_isr &= ~(1 << i); break; } }
-  } else if (port == 0xA1) {
-    if (pic2_initstep == 1) { pic2_base = v; pic2_initstep = 2; }
-    else if (pic2_initstep == 2) pic2_initstep = 3; else if (pic2_initstep == 3) pic2_initstep = 0; else pic2_mask = v;
-  } else if (port == 0x40) {                             // PIT ch0 reload
-    if (pit_wlo) { pit_reload = v; pit_wlo = 0; }
-    else { pit_reload |= (v << 8); pit_div = pit_reload; if (!pit_div) pit_div = 65536; pit_counter = pit_div; pit_wlo = 1; } } }
-// The ATA data port transfers 16-bit words. An x86 IN/OUT dword transfers two
-// words, including REP INSD/OUTSD used by the V5.03 disk driver.
-U64 IoInWidth(U64 port,I64 width)
-{
-  U64 value=IoIn(port);
-  if ((port==0x1F0 || port==0x170) && width==4) value|=IoIn(port)<<16;
-  return value;
-}
-U0 IoOutWidth(U64 port,U64 value,I64 width)
-{
-  IoOut(port,value);
-  if ((port==0x1F0 || port==0x170) && width==4) IoOut(port,value>>16);
-}
 // String I/O (INS/OUTS, +REP). The ATA PIO data port (0x1F0) flows through these for REP INSW disk
 // reads - IoIn returns blank-disk zeros, so the read completes instead of deadlocking the poller.
 U0 DoIns(I64 sz)                                          // INS: [RDI] <- port DX
 { I64 d; if (rfl & F_DF) d = -sz; else d = sz; if (!repf) { WrMem(reg[7], sz, IoInWidth(reg[2] & 0xFFFF, sz)); reg[7] += d; return; } while (reg[1] != 0) { WrMem(reg[7], sz, IoInWidth(reg[2] & 0xFFFF, sz)); reg[7] += d; reg[1]--; } }
 U0 DoOuts(I64 sz)                                         // OUTS: port DX <- [RSI]
 { I64 d; if (rfl & F_DF) d = -sz; else d = sz; if (!repf) { IoOutWidth(reg[2] & 0xFFFF, RdMem(reg[6], sz), sz); reg[6] += d; return; } while (reg[1] != 0) { IoOutWidth(reg[2] & 0xFFFF, RdMem(reg[6], sz), sz); reg[6] += d; reg[1]--; } }
-U0 CheckIrq()                                            // deliver one pending, unmasked IRQ
+U0 CheckIrq()
 {
-  I64 irq, b; b = pic1_irr & ~pic1_mask;
-  for (irq = 0; irq < 8; irq++)                          // PIC1 (IRQ0..7); IRQ2 = cascade from PIC2
-    if (b & (1 << irq)) { if (irq == 2) break; pic1_irr &= ~(1 << irq); pic1_isr |= (1 << irq); irq_count++; DoInt(pic1_base + irq, 0, 0); return; }
-  b = pic2_irr & ~pic2_mask;                             // PIC2 (IRQ8..15), e.g. IRQ12 = mouse
-  for (irq = 0; irq < 8; irq++)
-    if (b & (1 << irq)) { pic2_irr &= ~(1 << irq); pic2_isr |= (1 << irq); irq_count++; DoInt(pic2_base + irq, 0, 0); return; } }
+  I64 vec=PicNext;
+  if (vec>=0) DoInt(vec,0,0);
+}
 U0 Grp7()                                         // 0F 01 /digit: LGDT/LIDT/SGDT/SIDT
 {
   I64 d = rg & 7; if (!isMem) return;
@@ -943,7 +768,7 @@ U0 RunTo(U64 target,I64 budget)
   while (icount<lim && rip!=target && halted<2) {
     if (halted==1) {
       if (rfl&F_IF &&
-            ((pic1_irr&~pic1_mask) || (pic2_irr&~pic2_mask))) {
+            PicPending) {
         halted=0;
         CheckIrq;
       }
@@ -952,7 +777,7 @@ U0 RunTo(U64 target,I64 budget)
     icount++;
     TimeRun(1);
     if (rfl&F_IF &&
-          ((pic1_irr&~pic1_mask) || (pic2_irr&~pic2_mask)))
+          PicPending)
       CheckIrq;
   }
 }
@@ -1014,7 +839,7 @@ U0 Run(I64 maxi)
   I64 b,batch,cap,slot;
   Bool pending;
   while (icount<maxi && halted<2) {
-    pending=(pic1_irr&~pic1_mask) || (pic2_irr&~pic2_mask);
+    pending=PicPending;
     if (pending && rfl&F_IF) {
       halted=0;
       CheckIrq;
@@ -1066,7 +891,7 @@ U0 Run(I64 maxi)
 
 U0 Reset()
 {
-  I64 i; TimeRst; KbdRst; for (i = 0; i < 16; i++) reg[i] = 0; rip = 0; rfl = 0; halted = 0; icount = 0; g_badop = 0; reg[4] = 0x100000; cr0 = 0; cr2 = 0; cr3 = 0; cr4 = 0; cr8 = 0; g_cs = 0x08; g_ss = 0x10; idtr_base = 0; idtr_limit = 0; gdtr_base = 0; gdtr_limit = 0; tsc = 0;
+  I64 i; DevRst; for (i = 0; i < 16; i++) reg[i] = 0; rip = 0; rfl = 0; halted = 0; icount = 0; g_badop = 0; reg[4] = 0x100000; cr0 = 0; cr2 = 0; cr3 = 0; cr4 = 0; cr8 = 0; g_cs = 0x08; g_ss = 0x10; idtr_base = 0; idtr_limit = 0; gdtr_base = 0; gdtr_limit = 0; tsc = 0;
   for (i = 0; i < 16; i++) { xmm_lo[i] = 0; xmm_hi[i] = 0; }
-  pic1_base = 0; pic1_mask = 0xFF; pic1_irr = 0; pic1_isr = 0; pic1_initstep = 0; pic2_base = 0; pic2_mask = 0xFF; pic2_irr = 0; pic2_isr = 0; pic2_initstep = 0; pit_reload = 0; pit_div = 0; pit_counter = 0; pit_wlo = 1; }
+}
 U0 Load(U8 *p, I64 n, U64 at) { I64 i; for (i = 0; i < n; i++) mem[at + i] = p[i]; rip = at; }

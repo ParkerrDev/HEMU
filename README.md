@@ -13,7 +13,8 @@ This repository is HolyC source and the snapshots it boots. Nothing else.
 
 | Path | What |
 |---|---|
-| `src/cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses, plus the devices it touches (PIC, PIT, HPET, CMOS RTC, LAPIC/IOAPIC MMIO, PS/2, ATA, VGA DAC) and the HLE hooks |
+| `src/cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses, and the HLE hooks |
+| `src/Dev.HC`, `src/time.HC`, `src/keyboard.HC` | device state, port I/O, interrupt selection, elapsed clocks and PS/2 keyboard behavior |
 | `src/Mem.HC` | unaligned RAM reads/writes, the guest RAM alias, and saved-guest MMIO/IPI routing |
 | `src/Fpu.HC`, `src/Alu.HC`, `src/Shift.HC` | scalar floating-point, integer arithmetic and shift/rotate routines shared by instruction decoding |
 | `src/host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |

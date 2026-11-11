@@ -129,11 +129,10 @@ U0 HooksArm()
 
 U0 HemuInit()			       // once: guest RAM, the snapshot, registers, HLE hooks, the JIT handoff
 {
-  InitMem(RAM_SIZE + SCR_SIZE); VgaPaletteInit;      // 384 MiB guest RAM + the 16 MiB host/guest scratch window above it
+  InitMem(RAM_SIZE + SCR_SIZE);      // 384 MiB guest RAM + the 16 MiB host/guest scratch window above it
   __snap_load(mem);		     // host copies the TempleOS RAM snapshot into guest memory
   g_gc_sentinel = RAM_SIZE + SCR_SIZE - 16; mem[g_gc_sentinel] = 0xF4;	 // injected-call return sentinel: a HLT byte, never legitimately executed
-  TimeRst;
-  KbdRst;
+  DevRst;
   SetSnapRegs();
   if (g_names_ok=GuestNamesFind(g_cpu_st[0].f_msr_fsbase)) {
     hpet_freq=GuestU64(GuestVarMember("cnts","CCntsGlbls","HPET_freq"));
