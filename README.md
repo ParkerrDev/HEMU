@@ -33,7 +33,27 @@ native HolyC test adapter is headless, with no native desktop/JIT backend yet.
 | `src/snapregs.HC`, `src/snapregs-smp.HC` | generated: the register state captured together with the RAM snapshot (single-core / four-core) |
 | `src/boot.HC`, `src/anim.HC` | small demo entries that run a clang-compiled kernel inside the emulator |
 | `src/test.HC` | the self-checking instruction battery (`#include "cpu.HC"`; prints pass / fail counts) |
+| `stock.json`, `stock.disk`, `stock-smp.disk` | validated capture identities and exact paired disk sector overlays |
+| `capture.txt`, `capture-smp.txt` | original stopped native CPU register dumps, including FPU/XMM state |
 | `live.bin.gz`, `live-smp.bin.gz` | the booted-desktop RAM snapshots the entries resume (384 MiB flat images, gzipped) |
+
+## Stock capture identity
+
+`stock.json`, `capture.txt` and `capture-smp.txt` bind each RAM image to its
+native stopped CPU register set and disk. `stock.disk` and `stock-smp.disk`
+contain only changed 512-byte sectors against the recorded original base disk.
+A host must validate that pairing before execution; a RAM-only image contains
+no CPU state of its own. TempleOS-Web enforces this through the generated
+module's `hemu.stock` metadata and refuses unknown or mismatched RAM imports.
+Full saved-machine images retain their separate self-contained restore path.
+
+These captures preserve FCW, FSW, TOP, all sixteen XMM registers and HLT.
+They require all live x87 stacks to be empty because HEMU does not represent
+architectural 80-bit x87 values or tags. The raw native register dumps remain
+available for audit. Initial PIC/PIT/RTC state is still synthesized by the
+existing startup policy, not captured from QEMU; all CPUs being halted does
+not establish device-state equivalence. See TempleOS-Web's
+`tools/snapshot/README.md` for the independent capture and validation commands.
 
 ## The host contract
 
