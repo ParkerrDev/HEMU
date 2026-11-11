@@ -75,11 +75,12 @@ coordinates. ATA transfers support both 16-bit and 32-bit I/O, including REP INS
 writes preserve the 16-color palette and notify the host when colors change. A host must implement both
 `__host_disk` and `__host_disk_wr`.
 
-Interpreter, block JIT and verified graphics HLE are separate execution layers. Keep the HLE candidate
-verification and rejection path intact: a candidate is armed in verify mode and only activated after its
-native output has agreed with the emulated version bit-exactly, so a wrong match falls back instead of
-rendering garbage. The SMP build (`SMP_SNAP`) runs one core per host thread over shared memory; keep it
-under separate regression testing. Browser networking for TOOM multiplayer is not implemented.
+Interpreter, block JIT and graphics HLE are separate execution layers. Graphics
+fast paths are resolved by the guest's symbol names and reject unsupported
+transforms. Persistent checks compare their pixels, depth and collision results
+against the original guest routines with HLE disabled. The SMP build (`SMP_SNAP`)
+runs one core per host thread over shared memory and has separate worker/barrier
+regressions. Browser networking for TOOM multiplayer is not implemented.
 
 These checks cover observed workloads and regressions, not complete x86 hardware conformance or complete
 game playthroughs.
@@ -89,3 +90,9 @@ game playthroughs.
 The RAM images are captured from TempleOS booted under QEMU with the machine paused, together with the
 register state that becomes `src/snapregs*.HC`; the two must match, so re-bake the registers after every
 capture. The recipes live in TempleOS-Web's `tools/snapshot/`.
+
+The web host can also save and restore a complete live machine. Its versioned
+container includes the exact compiled engine, every core and device's state,
+guest memory, host input/settings, and the full current disk. SnapshotResume
+reconnects the host JIT and displays the saved frame without resetting the CPU.
+See TempleOS-Web/tools/hemu/README.md for the format and round-trip tests.
