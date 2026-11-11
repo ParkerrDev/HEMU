@@ -14,24 +14,26 @@ U0 SetAdd(U64 arg1,U64 arg2,U64 res,I64 size)
 {
   U64 mask=SizeMask(size),sign=1<<(size*8-1);
   SetZSP(res,size);
-  rfl&=~(F_CF|F_OF);
+  rfl&=~(F_CF|F_OF|F_AF);
   if (res&mask<arg1&mask) rfl|=F_CF;
   if ((arg1^res)&(arg2^res)&sign) rfl|=F_OF;
+  rfl|=(arg1^arg2^res)&F_AF;
 }
 
 U0 SetSub(U64 arg1,U64 arg2,U64 res,I64 size)
 {
   U64 mask=SizeMask(size),sign=1<<(size*8-1);
   SetZSP(res,size);
-  rfl&=~(F_CF|F_OF);
+  rfl&=~(F_CF|F_OF|F_AF);
   if (arg1&mask<arg2&mask) rfl|=F_CF;
   if ((arg1^arg2)&(arg1^res)&sign) rfl|=F_OF;
+  rfl|=(arg1^arg2^res)&F_AF;
 }
 
 U0 SetLogic(U64 res,I64 size)
-{
+{//Logical instructions leave AF undefined; use zero consistently.
   SetZSP(res,size);
-  rfl&=~(F_CF|F_OF);
+  rfl&=~(F_CF|F_OF|F_AF);
 }
 
 U64 Arith(I64 op,U64 arg1,U64 arg2,I64 size)
@@ -50,7 +52,8 @@ U64 Arith(I64 op,U64 arg1,U64 arg2,I64 size)
     case 2:
       res=(arg1+arg2+carry)&mask;
       SetZSP(res,size);
-      rfl&=~(F_CF|F_OF);
+      rfl&=~(F_CF|F_OF|F_AF);
+      rfl|=(arg1^arg2^res)&F_AF;
       if (size==8) {
 	sum=arg1+arg2;
 	tmp=sum+carry;
@@ -64,7 +67,8 @@ U64 Arith(I64 op,U64 arg1,U64 arg2,I64 size)
     case 3:
       res=(arg1-arg2-carry)&mask;
       SetZSP(res,size);
-      rfl&=~(F_CF|F_OF);
+      rfl&=~(F_CF|F_OF|F_AF);
+      rfl|=(arg1^arg2^res)&F_AF;
       if (arg1&mask<arg2&mask || arg1&mask==arg2&mask && carry)
 	rfl|=F_CF;
       if ((arg1^arg2)&(arg1^res)&sign) rfl|=F_OF;

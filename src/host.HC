@@ -54,5 +54,6 @@ import I64 __ap_run(U64 at, I64 budget);             // SMP application cores: t
 //                                          WASM global the host sets per worker. TempleOS's compiler: Gs->num.
 //   U64 __a_<op><bits>(U8 *addr, U64 v[, U64 nv]);   op = add|and|or|xor|xchg|cmpxchg, bits = 8|16|32|64:
 //                                          sequentially-consistent atomic RMW on shared memory, returning the old
-//                                          value (cmpxchg: v is the expected value, nv the replacement). These are
-//                                          the LOCK-prefixed x86 instructions on TempleOS's compiler.
+//                                          value (cmpxchg: v is the expected value, nv the replacement).
+//                                          These names are custom host intrinsics, not V5.03 symbols.
+//                                          A native host must supply equivalent atomic operations.

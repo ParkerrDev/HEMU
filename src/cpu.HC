@@ -105,6 +105,7 @@ U0 DecodeModRM(I64 immlen = 0)
 U64 RdRM(I64 sz) { if (isMem) return RdMem(ea, sz); return RdReg(rm, sz); }
 U0  WrRM(I64 sz, U64 v) { if (isMem) WrMem(ea, sz, v); else WrReg(rm, sz, v); }
 
+#include "Atom"
 #include "Shift.HC"
 
 //---------------------------------------------------------------- SHLD / SHRD
@@ -118,10 +119,11 @@ U0 DoShld(I64 isLeft, U64 src, I64 cnt, I64 sz)
 //---------------------------------------------------------------- grp3 (F6/F7): TEST/NOT/NEG/MUL/IMUL/DIV/IDIV
 U0 Grp3(I64 sz)
 {
-  I64 d, bit, sa, sl, sdd; U64 a, r, imm, hi, lo, b, q, rem, bv, al, ah, bl, bh, ll, lh, hl, hh, mid; d = rg & 7; a = RdRM(sz);
+  I64 d, bit, sa, sl, sdd; U64 a, r, imm, hi, lo, b, q, rem, bv, al, ah, bl, bh, ll, lh, hl, hh, mid; d = rg & 7;
+  if (d==2 || d==3) { RmUnary(d,sz); return; }
+  if (lockf) { AtomFault; return; }
+  a = RdRM(sz);
   if (d <= 1) { imm = FetchImm(sz); SetLogic((a & imm) & SizeMask(sz), sz); return; }   // TEST
-  if (d == 2) { WrRM(sz, ~a); return; }                                                 // NOT
-  if (d == 3) { r = 0 - a; WrRM(sz, r); SetSub(0, a, r, sz); return; }                  // NEG
   if (d == 4 || d == 5) {                                                               // MUL / IMUL
     b = RdReg(0, sz);
     if (sz == 8) {
@@ -228,33 +230,6 @@ U0 DoIret()                                       // IRETQ: pop RIP, CS, RFLAGS,
 U64 RdXmm64()        { if (isMem) return RdMem(ea, 8); return xmm_lo[rm]; }  // low 64 of xmm/m64
 
 //---------------------------------------------------------------- two-byte (0F) opcodes
-//---------------------------------------------------------------- LOCK atomics (SMP)
-// Atomic RMW on guest address `a` (host linear addr = mem + a). Native WASM atomics (0xFE family
-// via the holyc-wasm __a_* intrinsics) -> real cross-core atomicity over shared memory. Each
-// returns the OLD value. Caller guards alignment (atomics trap on misaligned >1-byte access).
-U64 AtomOr(U64 a, U64 v, I64 sz)   { if (sz==1) return __a_or8(mem+a,v);   if (sz==2) return __a_or16(mem+a,v);   if (sz==4) return __a_or32(mem+a,v);   return __a_or64(mem+a,v); }
-U64 AtomAnd(U64 a, U64 v, I64 sz)  { if (sz==1) return __a_and8(mem+a,v);  if (sz==2) return __a_and16(mem+a,v);  if (sz==4) return __a_and32(mem+a,v);  return __a_and64(mem+a,v); }
-U64 AtomXor(U64 a, U64 v, I64 sz)  { if (sz==1) return __a_xor8(mem+a,v);  if (sz==2) return __a_xor16(mem+a,v);  if (sz==4) return __a_xor32(mem+a,v);  return __a_xor64(mem+a,v); }
-U64 AtomAdd(U64 a, U64 v, I64 sz)  { if (sz==1) return __a_add8(mem+a,v);  if (sz==2) return __a_add16(mem+a,v);  if (sz==4) return __a_add32(mem+a,v);  return __a_add64(mem+a,v); }
-U64 AtomXchg(U64 a, U64 v, I64 sz) { if (sz==1) return __a_xchg8(mem+a,v); if (sz==2) return __a_xchg16(mem+a,v); if (sz==4) return __a_xchg32(mem+a,v); return __a_xchg64(mem+a,v); }
-U64 AtomCas(U64 a, U64 e, U64 v, I64 sz) { if (sz==1) return __a_cmpxchg8(mem+a,e,v); if (sz==2) return __a_cmpxchg16(mem+a,e,v); if (sz==4) return __a_cmpxchg32(mem+a,e,v); return __a_cmpxchg64(mem+a,e,v); }
-
-//---------------------------------------------------------------- bit ops (BT/BTS/BTR/BTC)
-// which: 0=BT (test only), 1=BTS (set), 2=BTR (reset), 3=BTC (complement).
-// CF := old bit. For a memory operand the bit index selects the byte (ea+bit/8),
-// so the bit string can exceed the operand width - which is how TempleOS's
-// LOCK BTS/BTR lock primitives address bits in a shared word.
-U0 DoBit(I64 which, U64 bit, I64 sz)
-{ U64 v, m, old; I64 asz; asz = sz; if (isMem) { ea += bit >> 3; bit &= 7; asz = 1; } else bit &= (sz * 8 - 1); m = 1; m <<= bit;
-  if (lockf && isMem && which && ea < mem_size) {                  // LOCK BTS/BTR/BTC -> atomic byte RMW (the TempleOS spinlock + mp_not_done_flags primitive)
-    if (which == 1)      old = AtomOr(ea, m, asz);
-    else if (which == 2) old = AtomAnd(ea, ~m, asz);
-    else                 old = AtomXor(ea, m, asz);
-    if (old & m) rfl |= F_CF; else rfl &= ~F_CF; return;
-  }
-  v = RdRM(asz); if (v & m) rfl |= F_CF; else rfl &= ~F_CF; if (which == 1)      WrRM(asz, v | m); else if (which == 2) WrRM(asz, v & ~m); else if (which == 3) WrRM(asz, v ^ m);
-}
-
 //---------------------------------------------------------------- FXSAVE / FXRSTOR
 // The scheduler saves/restores FPU+SSE state across task switches with these. The
 // XMM half MUST be exact (HolyC F64 math lives in SSE2 - a task resumed with stale
@@ -272,7 +247,9 @@ U0 DoFxrstor(U64 a)
 
 U0 Op0F()
 {
-  U64 op2, a, b, r, lo, hi, se, al, ah, bl, bh, ll, lh, hl, mid, v; I64 sz, cc, d, isz; F64 fx, fy; op2 = Fetch8(); if (rexW) sz = 8; else if (pfx66) sz = 2; else sz = 4;
+  U64 op2, a, b, r, lo, hi, se, al, ah, bl, bh, ll, lh, hl, mid, v; I64 sz, cc, d, isz; F64 fx, fy; op2 = Fetch8();
+  if (lockf && !AtomOp2(op2)) { AtomFault; return; }
+  if (rexW) sz = 8; else if (pfx66) sz = 2; else sz = 4;
   if (op2 >= 0x80 && op2 <= 0x8F) { cc = op2 - 0x80; d = SignExt32(Fetch32()); if (Cond(cc)) rip += d; return; }
   if (op2 >= 0x90 && op2 <= 0x9F) { cc = op2 - 0x90; DecodeModRM(); if (Cond(cc)) WrRM(1, 1); else WrRM(1, 0); return; }
   if (op2 >= 0x40 && op2 <= 0x4F) { cc = op2 - 0x40; DecodeModRM(); a = RdRM(sz); if (Cond(cc)) WrReg(rg, sz, a); else if (sz==4) WrReg(rg,4,RdReg(rg,4)); return; }  // CMOVcc
@@ -355,22 +332,10 @@ U0 Op0F()
     case 0xB3: DecodeModRM(); DoBit(2, RdReg(rg, sz), sz); break;                // BTR r/m, r
     case 0xBB: DecodeModRM(); DoBit(3, RdReg(rg, sz), sz); break;                // BTC r/m, r
     case 0xBA: DecodeModRM(1); d = (rg & 7) - 4; b = Fetch8(); DoBit(d, b, sz); break;  // grp8 BT/S/R/C r/m,imm8
-    case 0xB0: DecodeModRM(); a = RdReg(0, 1);                                    // CMPXCHG r/m8,r8
-               if (lockf && isMem && ea < mem_size) b = AtomCas(ea, a, RdReg(rg, 1), 1);
-               else { b = RdRM(1); if (a == b) WrRM(1, RdReg(rg, 1)); }
-               r = a - b; SetSub(a, b, r, 1); if (a != b) WrReg(0, 1, b); break;
-    case 0xB1: DecodeModRM(); a = RdReg(0, sz);                                   // CMPXCHG r/m,r
-               if (lockf && isMem && ea < mem_size && !(ea & (sz - 1))) b = AtomCas(ea, a, RdReg(rg, sz), sz);
-               else { b = RdRM(sz); if (a == b) WrRM(sz, RdReg(rg, sz)); }
-               r = a - b; SetSub(a, b, r, sz); if (a != b) WrReg(0, sz, b); break;
-    case 0xC0: DecodeModRM(); a = RdReg(rg, 1);                                   // XADD r/m8,r8
-               if (lockf && isMem && ea < mem_size) { b = AtomAdd(ea, a, 1); WrReg(rg, 1, b); }
-               else { b = RdRM(1); WrReg(rg, 1, b); WrRM(1, a + b); }
-               r = a + b; SetAdd(a, b, r, 1); break;
-    case 0xC1: DecodeModRM(); a = RdReg(rg, sz);                                  // XADD r/m,r
-               if (lockf && isMem && ea < mem_size && !(ea & (sz - 1))) { b = AtomAdd(ea, a, sz); WrReg(rg, sz, b); }
-               else { b = RdRM(sz); WrReg(rg, sz, b); WrRM(sz, a + b); }
-               r = a + b; SetAdd(a, b, r, sz); break;
+    case 0xB0: DecodeModRM; RmCmpXchg(1); break;
+    case 0xB1: DecodeModRM; RmCmpXchg(sz); break;
+    case 0xC0: DecodeModRM; RmXadd(1); break;
+    case 0xC1: DecodeModRM; RmXadd(sz); break;
     case 0xC3: DecodeModRM(); WrRM(sz, RdReg(rg, sz)); break;                    // MOVNTI r/m,r
     case 0xA4: DecodeModRM(); DoShld(1, RdReg(rg, sz), Fetch8(), sz); break;     // SHLD r/m,r,imm8
     case 0xA5: DecodeModRM(); DoShld(1, RdReg(rg, sz), RdReg(1, 1), sz); break;  // SHLD r/m,r,CL
@@ -581,7 +546,7 @@ I64 RasterHLE()
 
 U0 Step()
 {
-  U64 op, a, b, r, cf; I64 sz, d, opn, r2, imm;
+  U64 op, a, b, r; I64 sz, d, opn, r2, imm;
 
   if (g_hooktbl[rip & 0xFFFF]) {                   // gate: only ~1.5% of rips need the four hook compares
     if (RasterHLE) return;
@@ -602,9 +567,13 @@ U0 Step()
   if (op >= 0x40 && op <= 0x4F) { hasRex = 1; rexW = (op >> 3) & 1; rexR = (op >> 2) & 1; rexX = (op >> 1) & 1; rexB = op & 1; op = mem[rip]; rip++; }
   if (rexW) sz = 8; else if (pfx66) sz = 2; else sz = 4;
 
-  // ---- patterned ALU encodings (00..3F) ----
-  if (op < 0x40 && (op & 7) == 0) { opn = (op >> 3) & 7; DecodeModRM(); a = RdRM(1);     b = RdReg(rg, 1);  r = Arith(opn, a, b, 1);  if (opn != 7) WrRM(1, r);       return; }
-  if (op < 0x40 && (op & 7) == 1) { opn = (op >> 3) & 7; DecodeModRM(); a = RdRM(sz);    b = RdReg(rg, sz); r = Arith(opn, a, b, sz); if (opn != 7) WrRM(sz, r);      return; }
+  if (lockf && !AtomOp(op)) { AtomFault; return; }
+  if (op<0x40 && op&7<=1) {
+    if (!(op&1)) sz=1;
+    DecodeModRM;
+    RmArith(op>>3&7,RdReg(rg,sz),sz);
+    return;
+  }
   if (op < 0x40 && (op & 7) == 2) { opn = (op >> 3) & 7; DecodeModRM(); a = RdReg(rg, 1);  b = RdRM(1);     r = Arith(opn, a, b, 1);  if (opn != 7) WrReg(rg, 1, r);  return; }
   if (op < 0x40 && (op & 7) == 3) { opn = (op >> 3) & 7; DecodeModRM(); a = RdReg(rg, sz); b = RdRM(sz);    r = Arith(opn, a, b, sz); if (opn != 7) WrReg(rg, sz, r); return; }
   if (op < 0x40 && (op & 7) == 4) { opn = (op >> 3) & 7; b = Fetch8();        a = RdReg(0, 1);  r = Arith(opn, a, b, 1);  if (opn != 7) WrReg(0, 1, r);  return; }  // ALU AL, imm8
@@ -629,11 +598,17 @@ U0 Step()
       break;
     case 0xFC: rfl &= ~F_DF; break;                      // CLD
     case 0xFD: rfl |= F_DF; break;                       // STD
+    case 0xF8: rfl&=~F_CF; break;
+    case 0xF9: rfl|=F_CF; break;
+    case 0xF5: rfl^=F_CF; break;
     case 0x0F: Op0F(); break;
 
-    case 0x80: DecodeModRM(1); opn = rg & 7; a = RdRM(1);  b = Fetch8();          r = Arith(opn, a, b, 1);  if (opn != 7) WrRM(1, r);  break; // grp1 r/m8, imm8
-    case 0x83: DecodeModRM(1); opn = rg & 7; a = RdRM(sz); b = SignExt8(Fetch8());r = Arith(opn, a, b, sz); if (opn != 7) WrRM(sz, r); break; // grp1 r/m, imm8
-    case 0x81: d = 4; if (pfx66) d = 2; DecodeModRM(d); opn = rg & 7; a = RdRM(sz); b = FetchImm(sz); r = Arith(opn, a, b, sz); if (opn != 7) WrRM(sz, r); break; // grp1 r/m, imm
+    case 0x80: DecodeModRM(1); RmArith(rg&7,Fetch8,1); break;
+    case 0x83:
+      DecodeModRM(1); RmArith(rg&7,SignExt8(Fetch8),sz); break;
+    case 0x81:
+      d=4; if (sz==2) d=2;
+      DecodeModRM(d); RmArith(rg&7,FetchImm(sz),sz); break;
 
     case 0x84: DecodeModRM(); SetLogic((RdRM(1) & RdReg(rg, 1)) & 0xFF, 1); break;   // TEST r/m8, r8
     case 0x85: DecodeModRM(); SetLogic((RdRM(sz) & RdReg(rg, sz)) & SizeMask(sz), sz); break; // TEST r/m, r
@@ -644,12 +619,8 @@ U0 Step()
     case 0xA8: b = Fetch8();     SetLogic((RdReg(0, 1) & b) & 0xFF, 1); break;       // TEST AL, imm8
     case 0xA9: b = FetchImm(sz); SetLogic((RdReg(0, sz) & b) & SizeMask(sz), sz); break; // TEST eAX, imm
 
-    case 0x86: DecodeModRM();                                                                       // XCHG r/m8, r8 (mem form is implicitly LOCKed)
-               if (isMem && ea < mem_size) imm = AtomXchg(ea, RdReg(rg, 1), 1);
-               else { imm = RdRM(1); WrRM(1, RdReg(rg, 1)); } WrReg(rg, 1, imm); break;
-    case 0x87: DecodeModRM();                                                                       // XCHG r/m, r (mem form is implicitly LOCKed)
-               if (isMem && ea < mem_size && !(ea & (sz - 1))) imm = AtomXchg(ea, RdReg(rg, sz), sz);
-               else { imm = RdRM(sz); WrRM(sz, RdReg(rg, sz)); } WrReg(rg, sz, imm); break;
+    case 0x86: DecodeModRM; RmXchg(1); break;
+    case 0x87: DecodeModRM; RmXchg(sz); break;
     case 0x8E: DecodeModRM(); g_seg[rg & 7] = RdRM(2); break;     // MOV Sreg, r/m16 - selector stored, ignored (flat)
     case 0x8C: DecodeModRM(); WrRM(2, g_seg[rg & 7]); break;      // MOV r/m16, Sreg
     case 0xC6: DecodeModRM(1); WrRM(1, Fetch8()); break;          // MOV r/m8, imm8
@@ -689,16 +660,20 @@ U0 Step()
     case 0xF6: d=0; if (mem[rip]>>3&7<=1) d=1; DecodeModRM(d); Grp3(1);  break;
     case 0xF7: d=0; if (mem[rip]>>3&7<=1) {d=4; if (sz==2) d=2;} DecodeModRM(d); Grp3(sz); break;
 
-    case 0xFE: DecodeModRM();                                                       // grp4: INC/DEC r/m8
-      if ((rg & 7) == 0) { cf = rfl & F_CF; a = RdRM(1); r = a + 1; WrRM(1, r); SetAdd(a, 1, r, 1); rfl = (rfl & ~F_CF) | cf; }
-      else               { cf = rfl & F_CF; a = RdRM(1); r = a - 1; WrRM(1, r); SetSub(a, 1, r, 1); rfl = (rfl & ~F_CF) | cf; }
+    case 0xFE:
+      DecodeModRM;
+      if (rg&7<2) RmUnary(rg&7,1);
+      else {g_badop=0xFE;halted=2;}
       break;
-    case 0xFF: DecodeModRM();                                                       // grp5
-      if      ((rg & 7) == 0) { cf = rfl & F_CF; a = RdRM(sz); r = a + 1; WrRM(sz, r); SetAdd(a, 1, r, sz); rfl = (rfl & ~F_CF) | cf; }
-      else if ((rg & 7) == 1) { cf = rfl & F_CF; a = RdRM(sz); r = a - 1; WrRM(sz, r); SetSub(a, 1, r, sz); rfl = (rfl & ~F_CF) | cf; }
-      else if ((rg & 7) == 2) { reg[4] -= 8; WrMem(reg[4], 8, rip); rip = RdRM(8); }
-      else if ((rg & 7) == 4) { rip = RdRM(8); }
-      else if ((rg & 7) == 6) { reg[4] -= 8; WrMem(reg[4], 8, RdRM(8)); }
+    case 0xFF:
+      DecodeModRM;
+      d=rg&7;
+      if (d<2) RmUnary(d,sz);
+      else if (lockf) AtomFault;
+      else if (d==2) {reg[4]-=8;WrMem(reg[4],8,rip);rip=RdRM(8);}
+      else if (d==4) rip=RdRM(8);
+      else if (d==6) {reg[4]-=8;WrMem(reg[4],8,RdRM(8));}
+      else {g_badop=0xFF;halted=2;}
       break;
 
     case 0x50: case 0x51: case 0x52: case 0x53: case 0x54: case 0x55: case 0x56: case 0x57:

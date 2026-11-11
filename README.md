@@ -35,8 +35,11 @@ returns 0 from `__jit_state` gets a pure interpreter. Two compiler intrinsics co
 core's index) and the `__a_<op><bits>` atomics, both documented in the header. Everything else the source
 calls is standard HolyC. `MyCore` is a host intrinsic; a native adapter uses
 TempleOS's `Gs->num`. Bare intrinsic reads require HolyC-wasm A27 (52f06fb) or later.
-The extracted memory module has 324 independent V5.03 output comparisons;
-this does not establish native compatibility for the remaining CPU source.
+The complete interpreter compiles under original V5.03 with an explicit test
+host and passes the same 31 instruction cases as WASM. The memory and device
+modules also have 324 and 519 independent native output comparisons. The test
+host supplies serialized atomics and headless callbacks; it is not a native
+desktop, disk or JIT implementation.
 
 The host drives one `Main` call per display frame. `Main` runs `HemuInit` the first time and `Frame` every
 time; `Frame` pulls input, runs the instruction budget the host asked for, and presents. A host that runs
@@ -87,6 +90,16 @@ transforms. Persistent checks compare their pixels, depth and collision results
 against the original guest routines with HLE disabled. The SMP build (`SMP_SNAP`)
 runs one core per host thread over shared memory and has separate worker/barrier
 regressions. Browser networking for TOOM multiplayer is not implemented.
+
+`src/Atom.HC` owns memory read/modify/write operations, including implicit-lock
+XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG and bit changes. Aligned
+RAM and the TempleOS RAM alias use sequentially consistent host atomics. Invalid
+LOCK forms and unsupported unaligned/MMIO atomic operands stop with a retained
+fault instead of silently writing non-atomically. A full x86 bus-lock path,
+CMPXCHG8B/16B and architectural fault delivery are not implemented. Four-worker
+contention tests and an independent x86-64 hardware oracle cover arithmetic,
+defined flags and register writeback; logical operations set undefined AF to
+zero consistently in both interpreter and JIT.
 
 The x87 comparison contract follows Intel SDM revision 089: FCOMI/FUCOMI
 clear OF/SF/AF, preserve ZF/PF/CF and TOP on unmasked invalid operands, and
