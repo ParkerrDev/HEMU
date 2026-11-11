@@ -144,39 +144,7 @@ U0 WrReg(I64 i, I64 sz, U64 v)
   if (!hasRex && i >= 4 && i < 8) { reg[i - 4] = (reg[i - 4] & ~0xFF00) | ((v & 0xFF) << 8); return; }
   reg[i] = (reg[i] & ~0xFF) | (v & 0xFF); }
 
-//---------------------------------------------------------------- flags
-U0 SetZSP(U64 v, I64 sz)
-{ U64 m = SizeMask(sz), p; I64 c, k; v &= m; rfl &= ~(F_ZF | F_SF | F_PF); if (v == 0) rfl |= F_ZF; if ((v >> (sz * 8 - 1)) & 1) rfl |= F_SF; p = v & 0xFF; c = 0; for (k = 0; k < 8; k++) c += (p >> k) & 1; if (!(c & 1)) rfl |= F_PF; }
-U0 SetAdd(U64 a, U64 b, U64 r, I64 sz)
-{ U64 m = SizeMask(sz), sb = 1 << (sz * 8 - 1); SetZSP(r, sz); rfl &= ~(F_CF | F_OF); if ((r & m) < (a & m)) rfl |= F_CF; if ((a ^ r) & (b ^ r) & sb) rfl |= F_OF; }
-U0 SetSub(U64 a, U64 b, U64 r, I64 sz)
-{ U64 m = SizeMask(sz), sb = 1 << (sz * 8 - 1); SetZSP(r, sz); rfl &= ~(F_CF | F_OF); if ((a & m) < (b & m)) rfl |= F_CF; if ((a ^ b) & (a ^ r) & sb) rfl |= F_OF; }
-U0 SetLogic(U64 r, I64 sz) { SetZSP(r, sz); rfl &= ~(F_CF | F_OF); }
-
-U64 Arith(I64 opn, U64 a, U64 b, I64 sz)
-{
-  U64 r, m, sb, cin, full, t, rr; m = SizeMask(sz); sb = 1 << (sz * 8 - 1);
-  if      (opn == 0) { r = a + b; SetAdd(a, b, r, sz); }
-  else if (opn == 1) { r = a | b; SetLogic(r, sz); }
-  else if (opn == 2) {                                            // ADC
-    cin = 0; if (rfl & F_CF) cin = 1; r = (a + b + cin) & m; SetZSP(r, sz); rfl &= ~(F_CF | F_OF);
-    if (sz == 8) { t = a + b; rr = t + cin; if ((t < a) | (rr < t)) rfl |= F_CF; }
-    else { full = (a & m) + (b & m) + cin; if ((full >> (sz * 8)) & 1) rfl |= F_CF; }
-    if ((a ^ r) & (b ^ r) & sb) rfl |= F_OF; }
-  else if (opn == 3) {                                            // SBB
-    cin = 0; if (rfl & F_CF) cin = 1; r = (a - b - cin) & m; SetZSP(r, sz); rfl &= ~(F_CF | F_OF); if (((a & m) < (b & m)) | (((a & m) == (b & m)) & (cin != 0))) rfl |= F_CF; if ((a ^ b) & (a ^ r) & sb) rfl |= F_OF; }
-  else if (opn == 4) { r = a & b; SetLogic(r, sz); }
-  else if (opn == 5) { r = a - b; SetSub(a, b, r, sz); }
-  else if (opn == 6) { r = a ^ b; SetLogic(r, sz); }
-  else               { r = a - b; SetSub(a, b, r, sz); }          // CMP
-  return r; }
-
-I64 Cond(I64 cc)
-{
-  I64 o, c, z, s, p, t; o = (rfl >> 11) & 1; c = rfl & 1; z = (rfl >> 6) & 1; s = (rfl >> 7) & 1; p = (rfl >> 2) & 1; t = 0; if      (cc == 0)  t = o;            else if (cc == 1)  t = !o; else if (cc == 2)  t = c;            else if (cc == 3)  t = !c;
-  else if (cc == 4)  t = z;            else if (cc == 5)  t = !z; else if (cc == 6)  t = c | z;        else if (cc == 7)  t = !(c | z); else if (cc == 8)  t = s;            else if (cc == 9)  t = !s; else if (cc == 10) t = p;            else if (cc == 11) t = !p;
-  else if (cc == 12) t = (s != o);     else if (cc == 13) t = (s == o); else if (cc == 14) t = z | (s != o); else if (cc == 15) t = !(z | (s != o));
-  return t; }
+#include "Alu.HC"
 
 //---------------------------------------------------------------- ModRM + SIB
 // immlen = number of immediate bytes that follow this instruction's disp. It only
@@ -201,21 +169,7 @@ U0 DecodeModRM(I64 immlen = 0)
 U64 RdRM(I64 sz) { if (isMem) return RdMem(ea, sz); return RdReg(rm, sz); }
 U0  WrRM(I64 sz, U64 v) { if (isMem) WrMem(ea, sz, v); else WrReg(rm, sz, v); }
 
-//---------------------------------------------------------------- shifts (grp2)
-U0 DoShift(I64 opn, I64 cnt, I64 sz)
-{
-  U64 v, res, m; I64 last, bits; m = SizeMask(sz); bits = sz * 8; if (sz == 8) cnt &= 63; else cnt &= 31;
-  if (opn <= 3) cnt %= bits;                       // rotates: effective count mod width
-  if (cnt == 0) return; v = RdRM(sz) & m;
-  if (opn == 4)      { res = (v << cnt) & m;                  last = (v >> (bits - cnt)) & 1; }    // SHL
-  else if (opn == 5) { res = v >> cnt;                        last = (v >> (cnt - 1)) & 1; }        // SHR
-  else if (opn == 7) { res = SignExtTo64(v, sz) >> cnt; res &= m; last = (v >> (cnt - 1)) & 1; }    // SAR
-  else if (opn == 0) { res = ((v << cnt) | (v >> (bits - cnt))) & m; last = res & 1; }              // ROL
-  else if (opn == 1) { res = ((v >> cnt) | (v << (bits - cnt))) & m; last = (res >> (bits - 1)) & 1; } // ROR
-  else return;                                                                                      // RCL/RCR TODO
-  WrRM(sz, res); if (last) rfl |= F_CF; else rfl &= ~F_CF;
-  if (opn >= 4) SetZSP(res, sz);                   // shifts set ZF/SF/PF; rotates don't
-}
+#include "Shift.HC"
 
 //---------------------------------------------------------------- SHLD / SHRD
 U0 DoShld(I64 isLeft, U64 src, I64 cnt, I64 sz)
