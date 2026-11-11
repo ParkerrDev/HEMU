@@ -523,6 +523,7 @@ F64 FIntRound(F64 d,I64 rc)
     res--;
   else if (rc==2 && res<d)
     res++;
+  if (!res) return BitsToF64(F64ToBits(d)&0x8000000000000000);
   return res;
 }
 
@@ -727,7 +728,7 @@ U0 Op0F()
   U64 op2, a, b, r, lo, hi, se, al, ah, bl, bh, ll, lh, hl, mid, v; I64 sz, cc, d, isz; F64 fx, fy; op2 = Fetch8(); if (rexW) sz = 8; else if (pfx66) sz = 2; else sz = 4;
   if (op2 >= 0x80 && op2 <= 0x8F) { cc = op2 - 0x80; d = SignExt32(Fetch32()); if (Cond(cc)) rip += d; return; }
   if (op2 >= 0x90 && op2 <= 0x9F) { cc = op2 - 0x90; DecodeModRM(); if (Cond(cc)) WrRM(1, 1); else WrRM(1, 0); return; }
-  if (op2 >= 0x40 && op2 <= 0x4F) { cc = op2 - 0x40; DecodeModRM(); a = RdRM(sz); if (Cond(cc)) WrReg(rg, sz, a); return; }  // CMOVcc
+  if (op2 >= 0x40 && op2 <= 0x4F) { cc = op2 - 0x40; DecodeModRM(); a = RdRM(sz); if (Cond(cc)) WrReg(rg, sz, a); else if (sz==4) WrReg(rg,4,RdReg(rg,4)); return; }  // CMOVcc
   switch (op2) {
     case 0x1F: DecodeModRM(); break;                                              // multi-byte NOP
     case 0xB6: DecodeModRM(); WrReg(rg, sz, RdRM(1) & 0xFF); break;               // MOVZX r, r/m8
