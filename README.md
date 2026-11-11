@@ -16,7 +16,8 @@ This repository is HolyC source and the snapshots it boots. Nothing else.
 | `src/cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses, and the HLE hooks |
 | `src/Dev.HC`, `src/time.HC`, `src/keyboard.HC` | device state, port I/O, interrupt selection, elapsed clocks and PS/2 keyboard behavior |
 | `src/Mem.HC` | unaligned RAM reads/writes, the guest RAM alias, and saved-guest MMIO/IPI routing |
-| `src/Fpu.HC`, `src/Alu.HC`, `src/Shift.HC` | scalar floating-point, integer arithmetic and shift/rotate routines shared by instruction decoding |
+| `src/Fpu.HC`, `src/Alu.HC`, `src/MulDiv.HC`, `src/Shift.HC`, `src/Atom.HC` | scalar floating-point, integer arithmetic, full multiply/divide, shifts and supported atomic operations |
+| `src/Raster.HC`, `src/poly.HC`, `src/video.HC` | source-derived drawing acceleration, integer triangle edge walks and VGA conversion |
 | `src/host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |
 | `src/core.HC` | per-core CPU state (`CCpuState g_cpu_st[]` behind the `reg` / `rip` / `rfl` accessors) and the SMP and guest-call scaffolding every entry shares |
 | `src/guestcall.HC` | host-injected guest calls, the backend execution primitive (below) |
@@ -36,10 +37,16 @@ core's index) and the `__a_<op><bits>` atomics, both documented in the header. E
 calls is standard HolyC. `MyCore` is a host intrinsic; a native adapter uses
 TempleOS's `Gs->num`. Bare intrinsic reads require HolyC-wasm A27 (52f06fb) or later.
 The complete interpreter compiles under original V5.03 with an explicit test
-host and passes the same 31 instruction cases as WASM. The memory and device
+host and passes the same 31 instruction cases plus 707 sampled hardware multiply/divide
+assertions as WASM. The memory and device
 modules also have 324 and 519 independent native output comparisons. The test
 host supplies serialized atomics and headless callbacks; it is not a native
 desktop, disk or JIT implementation.
+Original QEMU/KVM also supplies 200 raster cases: native and accelerated line/
+triangle pixels, depth, collision counts, extents, nearest distance and final
+random seeds agree. These are bounded checks, not complete x86 or graphics
+coverage. Divide faults retain a stopped emulator state; guest #DE delivery
+is not implemented. Wide drawing contexts use original guest drawing code.
 
 The host drives one `Main` call per display frame. `Main` runs `HemuInit` the first time and `Frame` every
 time; `Frame` pulls input, runs the instruction budget the host asked for, and presents. A host that runs
