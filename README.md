@@ -12,8 +12,11 @@ This repository is HolyC source and the snapshots it boots. Nothing else.
 Startup resumes a captured, already booted 64-bit TempleOS desktop. It does not
 execute the DVD's 16-bit BIOS loader or perform a fresh installation from disk.
 The small `boot.HC` framebuffer kernel is an instruction/device fixture, not a
-TempleOS cold-boot test. The current desktop host uses a browser window; the
-native HolyC test adapter is headless, with no native desktop/JIT backend yet.
+TempleOS cold-boot test. TempleOS-Web hosts it in a browser window, and its
+`engine/native` hosts it in a native Qt window on Linux x86-64, where
+JavaScriptCore runs this WASM build and the block JIT on one core. macOS and
+other CPUs are not qualified yet. The native HolyC test adapter is headless,
+with no desktop or JIT of its own.
 
 ## Layout
 
