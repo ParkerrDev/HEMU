@@ -150,6 +150,15 @@ against the original guest routines with HLE disabled. The SMP build (`SMP_SNAP`
 runs one core per host thread over shared memory and has separate worker/barrier
 regressions. Browser networking for TOOM multiplayer is not implemented.
 
+Accesses past RAM are devices only on their own page: the LAPIC at 0xFEE00000
+(ID, version and the ICR that sends IPIs) and the HPET at 0xFED00000 (its main
+counter), in the low 4GB or through TempleOS's uncached alias. TempleOS draws
+the VGA planes through that same alias, at alias+0xA0000. Decoding by page
+offset alone once made pixel stores at offset 0x300 send IPIs whose vector
+was pixel data; an exception vector crashed an AP, and the BSP, left in
+single-user mode, ran only the window manager. Those stores are now ignored
+(TempleOS-Web `tools/hemu/mmio-alias.test.mjs`).
+
 `src/Atom.HC` owns memory read/modify/write operations, including implicit-lock
 XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG/8B/16B and bit changes.
 Aligned operands up to eight bytes, including the TempleOS RAM alias, use

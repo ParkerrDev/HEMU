@@ -1,21 +1,31 @@
+#define MMIO_HPET	0xFED00000
+#define MMIO_LAPIC	0xFEE00000
+
 U64 MmioRd(U64 a,I64)
-{//Saved guests use uncached device aliases; retain their page offsets.
-  U64 off=a&0xFFF;
-  if (off==0x20)
-    return MyCore<<24;
-  if (off==0x30)
-    return 0x50014;
-  if (off==0xF0)
-    return hpet_ctr;
-  if (off==0xF4 || off==0xF8)
-    return hpet_ctr>>32;
+{//Saved guests use uncached device aliases; match the device's page.
+//The VGA window shares the alias, so its pixels are not registers.
+  U64 page=a&0xFFFFF000,off=a&0xFFF;
+  if (page==MMIO_LAPIC) {
+    if (off==0x20)
+      return MyCore<<24;
+    if (off==0x30)
+      return 0x50014;
+  } else if (page==MMIO_HPET) {
+    if (off==0xF0)
+      return hpet_ctr;
+    if (off==0xF4 || off==0xF8)
+      return hpet_ctr>>32;
+  }
   return 0;
 }
 
 U0 MmioWr(U64 a,I64,U64 v)
 {//Publish the sender's prior writes before waking the destination core.
-  U64 off=a&0xFFF;
+//Only the LAPIC's ICR sends an IPI. Stores past RAM elsewhere, such as
+//the VGA planes through the uncached alias, are not device writes.
+  U64 page=a&0xFFFFF000,off=a&0xFFF;
   I64 dest,dm;
+  if (page!=MMIO_LAPIC) return;
   if (off==0x310) {
     g_icr_high[MyCore]=v;
     return;
