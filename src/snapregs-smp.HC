@@ -1,5 +1,5 @@
 //Stopped native registers SHA-256:
-//32013f401861bf9d415950e59e477e34b343983d03480f1869efe58ab1da02c3
+//3e1e28a6f82329f73597aa1cd3b269d032e42f407339acafbf9448e4e8847fbb
 //Empty x87 slots have no live value; provenance retains their raw payloads.
 U0 SetSnapRegs()
 {
@@ -9,7 +9,7 @@ U0 SetSnapRegs()
   g_cpu_st[0].f_reg[2]=0x0;
   g_cpu_st[0].f_reg[3]=0xAA8F;
   g_cpu_st[0].f_reg[4]=0x15F86C40;
-  g_cpu_st[0].f_reg[5]=0x10D34EC8;
+  g_cpu_st[0].f_reg[5]=0xFFBBE0;
   g_cpu_st[0].f_reg[6]=0x100300;
   g_cpu_st[0].f_reg[7]=0x15F8C028;
   g_cpu_st[0].f_reg[8]=0xBE40;
@@ -17,8 +17,8 @@ U0 SetSnapRegs()
   g_cpu_st[0].f_reg[10]=0x0;
   g_cpu_st[0].f_reg[11]=0x0;
   g_cpu_st[0].f_reg[12]=0x0;
-  g_cpu_st[0].f_reg[13]=0x1;
-  g_cpu_st[0].f_reg[14]=0x7EE;
+  g_cpu_st[0].f_reg[13]=0x0;
+  g_cpu_st[0].f_reg[14]=0x0;
   g_cpu_st[0].f_reg[15]=0x0;
   g_cpu_st[0].f_rip=0xCC3A;
   g_cpu_st[0].f_rfl=0x246;
@@ -26,7 +26,7 @@ U0 SetSnapRegs()
   g_cpu_st[0].f_msr_fsbase=0x15F8BA28;
   g_cpu_st[0].f_msr_gsbase=0x15F8C028;
   g_cpu_st[0].f_x87_cw=0x37F;
-  g_cpu_st[0].f_x87_sw=0x20;
+  g_cpu_st[0].f_x87_sw=0x230;
   g_cpu_st[0].f_fsp=0;
   g_cpu_st[0].f_fpr[0]=0.0;
   g_cpu_st[0].f_fpr[1]=0.0;
@@ -132,16 +132,16 @@ U0 SetSnapRegs()
   g_xmm_hi[1][14]=0x0;
   g_xmm_lo[1][15]=0x0;
   g_xmm_hi[1][15]=0x0;
-  g_cpu_st[2].f_reg[0]=0x11BEB228;
+  g_cpu_st[2].f_reg[0]=0x11A9DC28;
   g_cpu_st[2].f_reg[1]=0x0;
   g_cpu_st[2].f_reg[2]=0xFEE000B0;
   g_cpu_st[2].f_reg[3]=0xAA8F;
-  g_cpu_st[2].f_reg[4]=0x11BE6440;
-  g_cpu_st[2].f_reg[5]=0x11C2BBE8;
-  g_cpu_st[2].f_reg[6]=0x11C30628;
-  g_cpu_st[2].f_reg[7]=0x15F8C228;
+  g_cpu_st[2].f_reg[4]=0x11A98E40;
+  g_cpu_st[2].f_reg[5]=0x11ADE5E8;
+  g_cpu_st[2].f_reg[6]=0x11AE3028;
+  g_cpu_st[2].f_reg[7]=0x15F8C328;
   g_cpu_st[2].f_reg[8]=0x0;
-  g_cpu_st[2].f_reg[9]=0x15F8C298;
+  g_cpu_st[2].f_reg[9]=0x15F8C398;
   g_cpu_st[2].f_reg[10]=0x0;
   g_cpu_st[2].f_reg[11]=0x0;
   g_cpu_st[2].f_reg[12]=0x0;
@@ -151,8 +151,8 @@ U0 SetSnapRegs()
   g_cpu_st[2].f_rip=0xCC3A;
   g_cpu_st[2].f_rfl=0x246;
   g_cpu_st[2].f_halted=1;
-  g_cpu_st[2].f_msr_fsbase=0x11BEB228;
-  g_cpu_st[2].f_msr_gsbase=0x15F8C228;
+  g_cpu_st[2].f_msr_fsbase=0x11A9DC28;
+  g_cpu_st[2].f_msr_gsbase=0x15F8C328;
   g_cpu_st[2].f_x87_cw=0x37F;
   g_cpu_st[2].f_x87_sw=0x0;
   g_cpu_st[2].f_fsp=0;
@@ -196,16 +196,16 @@ U0 SetSnapRegs()
   g_xmm_hi[2][14]=0x0;
   g_xmm_lo[2][15]=0x0;
   g_xmm_hi[2][15]=0x0;
-  g_cpu_st[3].f_reg[0]=0x11A9DC28;
+  g_cpu_st[3].f_reg[0]=0x11BEB228;
   g_cpu_st[3].f_reg[1]=0x0;
   g_cpu_st[3].f_reg[2]=0xFEE000B0;
   g_cpu_st[3].f_reg[3]=0xAA8F;
-  g_cpu_st[3].f_reg[4]=0x11A98E40;
-  g_cpu_st[3].f_reg[5]=0x11ADE5E8;
-  g_cpu_st[3].f_reg[6]=0x11AE3028;
-  g_cpu_st[3].f_reg[7]=0x15F8C328;
+  g_cpu_st[3].f_reg[4]=0x11BE6440;
+  g_cpu_st[3].f_reg[5]=0x11C2BBE8;
+  g_cpu_st[3].f_reg[6]=0x11C30628;
+  g_cpu_st[3].f_reg[7]=0x15F8C228;
   g_cpu_st[3].f_reg[8]=0x0;
-  g_cpu_st[3].f_reg[9]=0x15F8C398;
+  g_cpu_st[3].f_reg[9]=0x15F8C298;
   g_cpu_st[3].f_reg[10]=0x0;
   g_cpu_st[3].f_reg[11]=0x0;
   g_cpu_st[3].f_reg[12]=0x0;
@@ -215,8 +215,8 @@ U0 SetSnapRegs()
   g_cpu_st[3].f_rip=0xCC3A;
   g_cpu_st[3].f_rfl=0x246;
   g_cpu_st[3].f_halted=1;
-  g_cpu_st[3].f_msr_fsbase=0x11A9DC28;
-  g_cpu_st[3].f_msr_gsbase=0x15F8C328;
+  g_cpu_st[3].f_msr_fsbase=0x11BEB228;
+  g_cpu_st[3].f_msr_gsbase=0x15F8C228;
   g_cpu_st[3].f_x87_cw=0x37F;
   g_cpu_st[3].f_x87_sw=0x0;
   g_cpu_st[3].f_fsp=0;

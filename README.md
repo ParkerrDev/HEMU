@@ -235,7 +235,9 @@ game playthroughs.
 
 The RAM images are captured from TempleOS booted under QEMU with the machine paused, together with the
 register state that becomes `src/snapregs*.HC`; the two must match, so re-bake the registers after every
-capture. The recipes live in TempleOS-Web's `tools/snapshot/`.
+capture. The recipes live in TempleOS-Web's `tools/snapshot/`. The stock
+images stop at TempleOS's own "Take Tour(y or n)?" question, so a visitor answers it, as on a
+fresh install.
 
 The web host can also save and restore a complete live machine. Its versioned
 container includes the exact compiled engine, every core and device's state,

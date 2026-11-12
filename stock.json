@@ -12,15 +12,16 @@
       "cores": 1,
       "ram": "live.bin.gz",
       "ramBytes": 402653184,
-      "ramSha256": "a30ba131c7fdf4893f3bc8fe3e33f4dda3eb4c00248d478f3d18d2ae194f0cf6",
-      "gzipSha256": "42db6570ffd1610ea2a39a60dd59e63095c60ac39610350a649c5671528a449a",
+      "ramSha256": "e111895458da2d0bb4f26f58d8e4d020ff8fbd229d907a2c4a0703b0a16b4f69",
+      "gzipSha256": "95011614748141aa2c23d8f2110ff7e898773448a0d893a2243c16583e18b9e8",
       "registers": "capture.txt",
-      "registerSha256": "a086057293d75a16257aa6d3dd90538a895abddf6e714adbbf0549dd455aeddf",
-      "sourceSha256": "baf67a1b52050fe65db05a2e5080c504d30f2f0f768398289e5f3f9fb76a2fae",
+      "registerSha256": "1e5ac6efc7be37fc3e4c34a9b59ace04176fd2cf877313dd469a40d58932e253",
+      "sourceSha256": "110bc8ea2b2b87a732ea3e785b9cbf7fc380bfae824227e15bc00aac5fb56fa2",
+      "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
       "overlay": "stock.disk",
       "overlayBytes": 2580,
-      "overlaySha256": "032751a6b626aea216ab9d675d2b404f27a5e9f61261903cec8b6ea792d964a8",
-      "diskSha256": "647d7c74665dd35ec0c211ea55c214785dc88a01fed258b4602b600c3c5c853d",
+      "overlaySha256": "894ceacb281d444e58508622008fbbe34c93db435233053976065a1d1bef86e3",
+      "diskSha256": "c3ffa2b67733d6615e10f46c304c30f2ed98f3bd5a3b1e7bc6c8c4f69d441b63",
       "evidence": {
         "backend": "QEMU emulator version 11.1.2",
         "accel": "kvm",
@@ -28,47 +29,47 @@
         "inputDiskSha256": "ca12b5604c2f1d9fe83a7f910ce131f0bf074e1d33f24aa68fd4fad34198d148",
         "inputRawDiskSha256": "f8673e751d7e313b6552ac5688c31a4ea19148326a7d560b103217f004e1322a",
         "fontSha256": "7f15a2b20ae01e909fa8cf6f87301cfdb618fd63f2e42fe1ac454c37865c32b2",
-        "captureScriptSha256": "88e7cad7a65ba1efabff2031ad113aea15e7b6d36b723d4a4fb3461724b63840",
-        "parserSha256": "221d9c135e2ebfaf0ddf3e6097e98b9a852a6a58299da49ab6e977f6b16d7300",
-        "samples": 8,
+        "captureScriptSha256": "235aa7655206a66bb838563c3851eeba525ba506ef5d8fc356d1aff3447ec594",
+        "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
+        "samples": 7,
         "files": {
           "live.bin": {
             "bytes": 402653184,
-            "sha256": "a30ba131c7fdf4893f3bc8fe3e33f4dda3eb4c00248d478f3d18d2ae194f0cf6"
+            "sha256": "e111895458da2d0bb4f26f58d8e4d020ff8fbd229d907a2c4a0703b0a16b4f69"
           },
           "disk.raw": {
             "bytes": 268435456,
-            "sha256": "647d7c74665dd35ec0c211ea55c214785dc88a01fed258b4602b600c3c5c853d"
+            "sha256": "c3ffa2b67733d6615e10f46c304c30f2ed98f3bd5a3b1e7bc6c8c4f69d441b63"
           },
           "registers.txt": {
             "bytes": 2121,
-            "sha256": "a086057293d75a16257aa6d3dd90538a895abddf6e714adbbf0549dd455aeddf"
+            "sha256": "1e5ac6efc7be37fc3e4c34a9b59ace04176fd2cf877313dd469a40d58932e253"
           },
           "snapregs.HC": {
-            "bytes": 2267,
-            "sha256": "e9c70f515cb29a54bba1cbf11ce915fcf59bbc8e804027e4bb2980e260172f31"
+            "bytes": 2277,
+            "sha256": "110bc8ea2b2b87a732ea3e785b9cbf7fc380bfae824227e15bc00aac5fb56fa2"
           },
           "captured.ppm": {
             "bytes": 921615,
-            "sha256": "80523d66237f8dc1d5272d315f2452ef26fd2acfec9e9fbe5dc60be341f4dd2f"
+            "sha256": "f3b327d289455b0d1118235aa5ac3796a8a6c52967642408cf3e62bdc3320a21"
           }
         }
-      },
-      "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f"
+      }
     },
     {
       "cores": 4,
       "ram": "live-smp.bin.gz",
       "ramBytes": 402653184,
-      "ramSha256": "5c4983d3bb84036d87a061ba39f80972c05420b26a2e4278335ce072a94dd559",
-      "gzipSha256": "97269db25c5f9e232f042decde6a6574ea992e625130aaca77d2f1ddabfd3973",
+      "ramSha256": "9176bddf6143130e1241c0b52326afee196361db9c91ff8433c81a8389af643d",
+      "gzipSha256": "a0ad4d37aedebf29582e435cbebf464a7e8272d082b15e1b25986d320e4fb9e4",
       "registers": "capture-smp.txt",
-      "registerSha256": "32013f401861bf9d415950e59e477e34b343983d03480f1869efe58ab1da02c3",
-      "sourceSha256": "a5dde46a92771d89f67a193244ed28783d10f047e1c62fc7915f95cc456f6671",
+      "registerSha256": "3e1e28a6f82329f73597aa1cd3b269d032e42f407339acafbf9448e4e8847fbb",
+      "sourceSha256": "6ad326531be221c42d3469f8b3410f0369ca41897d859c6547c73f79ef18350e",
+      "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
       "overlay": "stock-smp.disk",
       "overlayBytes": 2580,
-      "overlaySha256": "9079d2238b708e0fa168558e1fa1a5bed703e35c4f89e4e1fd0698a7330ee327",
-      "diskSha256": "eb0cecd76e17d15c3760420c1837d77b0fdd123ce4f289c1331a01e54b4a28d5",
+      "overlaySha256": "48f88f298896a57bd1d1ecec881c6cb253336b9c85c6f3cccdcae1705861c32b",
+      "diskSha256": "00df5d900e1c507b41a19797710f7da68b9d9a7983535f1e4517932924b1ce87",
       "evidence": {
         "backend": "QEMU emulator version 11.1.2",
         "accel": "kvm",
@@ -76,33 +77,32 @@
         "inputDiskSha256": "ca12b5604c2f1d9fe83a7f910ce131f0bf074e1d33f24aa68fd4fad34198d148",
         "inputRawDiskSha256": "f8673e751d7e313b6552ac5688c31a4ea19148326a7d560b103217f004e1322a",
         "fontSha256": "7f15a2b20ae01e909fa8cf6f87301cfdb618fd63f2e42fe1ac454c37865c32b2",
-        "captureScriptSha256": "88e7cad7a65ba1efabff2031ad113aea15e7b6d36b723d4a4fb3461724b63840",
-        "parserSha256": "221d9c135e2ebfaf0ddf3e6097e98b9a852a6a58299da49ab6e977f6b16d7300",
+        "captureScriptSha256": "235aa7655206a66bb838563c3851eeba525ba506ef5d8fc356d1aff3447ec594",
+        "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
         "samples": 6,
         "files": {
           "live.bin": {
             "bytes": 402653184,
-            "sha256": "5c4983d3bb84036d87a061ba39f80972c05420b26a2e4278335ce072a94dd559"
+            "sha256": "9176bddf6143130e1241c0b52326afee196361db9c91ff8433c81a8389af643d"
           },
           "disk.raw": {
             "bytes": 268435456,
-            "sha256": "eb0cecd76e17d15c3760420c1837d77b0fdd123ce4f289c1331a01e54b4a28d5"
+            "sha256": "00df5d900e1c507b41a19797710f7da68b9d9a7983535f1e4517932924b1ce87"
           },
           "registers.txt": {
             "bytes": 8484,
-            "sha256": "32013f401861bf9d415950e59e477e34b343983d03480f1869efe58ab1da02c3"
+            "sha256": "3e1e28a6f82329f73597aa1cd3b269d032e42f407339acafbf9448e4e8847fbb"
           },
           "snapregs.HC": {
-            "bytes": 7336,
-            "sha256": "11ca890dc58740f5654e7cd6707180fe78b9c1234a4424336fa95cd31a22996d"
+            "bytes": 7328,
+            "sha256": "6ad326531be221c42d3469f8b3410f0369ca41897d859c6547c73f79ef18350e"
           },
           "captured.ppm": {
             "bytes": 921615,
-            "sha256": "e3afe005b5f43c76af903a2ee8635a4f1416d067aae5019dfb177de6804d90c3"
+            "sha256": "da93d94458f74501c8b993b8e51c84f296cb7232655f6dd8878917b885e77e98"
           }
         }
-      },
-      "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f"
+      }
     }
   ]
 }
