@@ -43,6 +43,7 @@ I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
 	cur_a=of_dc.cur_x,cur_c=of_dc.cur_y,
 	cnt,cx,cy,dist,dx,dy,wzn=0,cov_row=0,cov_step=1;
   I32 *depth;
+  U8 *dst;
   Bool dither=FALSE,probability_dither=FALSE,need_cov,char_clear=TRUE;
   if (!zbuf) return -1;
   if (vert) {
@@ -149,6 +150,38 @@ I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
     } else
       need_cov=FALSE;
   }
+  if (!vert && !need_cov && !(w1&0xFF00)) {
+    dst=mem+body+idx;
+    depth=(mem+zptr)(I32 *);
+    if (!dither) {
+      for (i=x1;i<=x2;i++) {
+	cur_z=zacc>>32;
+	if (0<=cur_z<=*depth) {
+	  *depth=cur_z;
+	  *dst=cw;
+	  res++;
+	}
+	dst++;depth++;zacc+=zslope;
+      }
+      goto sf_done;
+    }
+    if (probability_dither) {
+      for (i=x1;i<=x2;i++) {
+	cur_z=zacc>>32;
+	if (0<=cur_z<=*depth) {
+	  *depth=cur_z;
+	  *dst=cw;
+	  res++;
+	}
+	if (RasterRand(fsb)<*(mem+dc+of_dc.dither_probability_u16)(U64 *))
+	  cw=w2;
+	else
+	  cw=w1;
+	dst++;depth++;zacc+=zslope;
+      }
+      goto sf_done;
+    }
+  }
   for (i=x1;i<=x2;i++) {
     if (char_clear) {
       cur_z=zacc>>32;
@@ -181,6 +214,7 @@ I64 SpanFill(U64 dc,I64 vert,I64 x1,I64 x2,I64 y,I64 z1,I64 z2)
 	    *(mem+wzbuf+(cov_row+(i+1)>>3*cov_step)*2)(U16 *);
     idx+=pix_step;zptr+=pix_step*4;zacc+=zslope;
   }
+sf_done:
   g_raster_calls++;
   return res;
 }
