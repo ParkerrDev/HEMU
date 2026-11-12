@@ -35,7 +35,7 @@ import I64 __host_ns();                               //nanoseconds since the la
 import I64 __host_dt();                               // real milliseconds since the last frame (wall-clock pacing)
 import I64 __host_budget();                           // guest instructions to run this frame
 import I64 __host_time(I64 cmos_reg);                 // host wall clock for the CMOS RTC register the guest selected
-import U0  __snd(F64 hz);                             // PC speaker tone in Hz (0 = off); holyc-wasm's runtime also has it
+import U0 __host_snd(F64 hz,U64 ns); //Speaker frequency (0 off) and observed TSC nanoseconds.
 
 // ---- optional: native block JIT / per-core dispatch ------------------------------------------
 // A host without a JIT returns 0 from __jit_state and 0 from __ap_run; hemu then runs as a pure

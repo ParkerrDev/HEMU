@@ -59,6 +59,21 @@ not establish device-state equivalence. See TempleOS-Web's
 
 `src/host.HC` is the whole interface. Required: load the snapshot into guest RAM, present a frame, VGA
 palette writes, ATA sector reads and writes, mouse and keyboard state, wall-clock pacing, a speaker tone.
+Speaker updates use the required `__host_snd(F64 hz,U64 ns)` import. Zero Hz
+means silence; `ns` is the observed emulated TSC in nanoseconds, including on
+saved-machine resume. Hosts must retain unsigned 64-bit timestamps rather than
+rounding them through a floating-point number. `TscRead` is also exported by
+the web build for an end-of-batch audio watermark. Earlier embedded modules
+use the generic one-argument `__snd`; their untimed behavior remains supported
+by the new host. New modules require the new import and older hosts reject
+them at instantiation. Release the engine and host adapter together.
+
+Timestamped playback is qualified only for the one-core native host. The BSP
+advances device time; APs only observe that shared clock. This addition does not
+make ordinary shared TSC reads or speaker port updates globally ordered across
+cores, and supplies no cross-worker audio ordering guarantee. Instruction-batch
+clock granularity and the existing frequency-only PIT model remain unchanged;
+this is not physical PIT phase or cycle-accurate speaker emulation.
 Optional: the `__jit_*` / `__ap_run` hooks a host may implement to run hot guest code natively - a host that
 returns 0 from `__jit_state` gets a pure interpreter. Two compiler intrinsics complete it: `MyCore` (this
 core's index) and the `__a_<op><bits>` atomics, both documented in the header. Everything else the source

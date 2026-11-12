@@ -23,9 +23,9 @@ U0 Ps2Resp(I64 b,I64 is_ms)
 U0 UpdateSpk()
 {//PIT channel 2 drives the speaker while both port 0x61 gates are set.
   if (spk_on && pit2_div)
-    __snd(1193182.0/pit2_div);
+    __host_snd(1193182.0/pit2_div,TscRead);
   else
-    __snd(0.0);
+    __host_snd(0.0,TscRead);
 }
 
 U0 VgaPaletteSend(I64 i)
