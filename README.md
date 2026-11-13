@@ -65,7 +65,12 @@ two, that line and `~/.local/share/applications/HEMU.desktop`.
   has finished one, so a frame is never shown half drawn. It runs at TempleOS's own 30 frames a second.
 - The pointer is TempleOS's mouse, and keys are sent as the set 1 scan codes of the same physical
   keys, with the keyboard's own typematic repeat. Keys with SUPER held stay Hyprland's.
-- `Reboot` and a triple fault start the capture again. Closing the window ends the machine.
+- `Reboot` and a triple fault start the capture again in the same window. Closing the window ends
+  the machine.
+- The capture's CD drive T: has no device here, so HEMU takes its signature away and `Dir("T:/")`
+  throws `Drv` as for a drive that is not there.
+- `make_hemu` may run while HEMU is open: it moves new files over the old ones, and the running
+  machine keeps the ones it mapped until it ends or reboots.
 - RAM and disk are private copies of the capture: what TempleOS writes is gone when HEMU ends, as on a
   reload of TempleOS-Web.
 - With `capture.txt`, `live.bin.gz` and `stock.disk` in place of the four-core files, the same program

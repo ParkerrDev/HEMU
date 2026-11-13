@@ -4,22 +4,27 @@
 #~/.local/share/HEMU, TempleOS in the launcher, and SUPER+ALT+T under
 #Hyprland.
 
-set -e
+#Each file is made beside the old one and moved over it, so a HEMU that
+#is running keeps the files it mapped.
+
+set -eo pipefail
 cd "$(dirname "$0")"
 D=~/.local/share/HEMU
-mkdir -p $D ~/.local/share/applications
+mkdir -p "$D" ~/.local/share/applications
 
 echo Make HEMU
-cc -O2 HEMU.CPP -o $D/HEMU -lasound
-zcat ../live-smp.bin.gz | cp --sparse=always /dev/stdin $D/RAM.BIN
-cp ../capture-smp.txt $D/Regs.TXT
+cc -O2 HEMU.CPP -o "$D/HEMU.new" -lasound
+zcat ../live-smp.bin.gz | cp --sparse=always /dev/stdin "$D/RAM.BIN.new"
+cp ../capture-smp.txt "$D/Regs.TXT.new"
 
 #The disk: the qcow2's clusters laid flat, then the sectors the capture
 #had changed, each a 32 bit block number and its 512 bytes.
-python3 - ../templeos-hd.qcow2.gz ../stock-smp.disk $D/Disk.BIN <<'PY'
+python3 - ../templeos-hd.qcow2.gz ../stock-smp.disk "$D/Disk.BIN.new" <<'PY'
 import gzip,struct,sys
 q=gzip.open(sys.argv[1]).read()
 bits,size,crypt,l1_cnt,l1=struct.unpack_from('>IQIIQ',q,20)
+assert not struct.unpack_from('>Q',q,8)[0],'backing file'
+assert not struct.unpack_from('>Q',q,72)[0],'incompatible feature'
 with open(sys.argv[3],'wb') as f:
   f.truncate(size)
   for i in range(l1_cnt):
@@ -27,6 +32,8 @@ with open(sys.argv[3],'wb') as f:
     for j in range(l2 and 1<<bits-3):
       c=struct.unpack_from('>Q',q,l2+j*8)[0]
       assert not c>>62&1,'compressed cluster'
+      if c&1: #Reads as zeros.
+        continue
       c&=0xFFFFFFFFFFFE00
       if c:
         f.seek((i<<bits-3|j)<<bits)
@@ -36,6 +43,9 @@ with open(sys.argv[3],'wb') as f:
     f.seek(struct.unpack_from('<I',o,i)[0]*512)
     f.write(o[i+4:i+516])
 PY
+for f in HEMU RAM.BIN Regs.TXT Disk.BIN; do
+  mv -f "$D/$f.new" "$D/$f"
+done
 
 cat >~/.local/share/applications/HEMU.desktop <<DESKTOP
 [Desktop Entry]
@@ -53,7 +63,7 @@ hl.bind("SUPER + ALT + T", hl.dsp.exec_cmd("$D/HEMU"), {
   description = "TempleOS",
 })
 LUA
-  grep -q hypr.hemu ~/.config/hypr/hyprland.lua || echo \
+  grep -q hypr.hemu ~/.config/hypr/hyprland.lua || printf '\n%s\n' \
 	'if package.searchpath("hypr.hemu", package.path) then require("hypr.hemu") end' \
 	>>~/.config/hypr/hyprland.lua
 fi

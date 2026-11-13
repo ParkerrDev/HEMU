@@ -86,8 +86,8 @@ U8 kbd_q[64],vga_dac[768],*ata_ptr,
 U16 ata_reg[8];
 U64 kbd_down[2]; //A bit a key that is held.
 I64 kbd_head,kbd_tail,kbd_cmd,kbd_type,kbd_rpt_key,kbd_rpt_ns,
-	ps2_q[16],ps2_head,ps2_tail,rtc_idx,vga_idx,vga_rd,vga_wr,ata_len;
-Bool ps2_ms,ps2_cfg,ata_wr;
+	rtc_idx,vga_idx,vga_rd,vga_wr,ata_len,ms_wheel;
+Bool ata_wr;
 
 class CWlGlbl
 {public:
@@ -112,16 +112,15 @@ I64 Ns()
 }
 
 U0 Rst()
-{//A reset is the capture again.
-  execv("/proc/self/exe",args);
+{//A reset is the capture again. main went to HEMU's directory.
+  execv("HEMU",args);
   Die("HEMU");
 }
 
 U8 *FileMap(const char *name,I64 *_size)
-{//A private copy of a file: what the guest writes ends with HEMU. The
-//page's zeros after a text end it.
+{//A private copy of a file: what the guest writes ends with HEMU.
   struct stat st;
-  I32 fd=open(name,O_RDONLY);
+  I32 fd=open(name,O_RDONLY|O_CLOEXEC);
   U8 *res;
   if (fd<0 || fstat(fd,&st)<0)
     Die(name);
@@ -181,7 +180,14 @@ U0 SymInit(U64 task)
   ms_pos_text=Var("ms","CMsStateGlbls","pos_text");
   ms_lb=Var("ms","CMsStateGlbls","lb");
   ms_rb=Var("ms","CMsStateGlbls","rb");
+  //The pointer is HEMU's. With irqs_working, WinMgr does not poll port
+  //0x64 for mouse bytes that would take a key's.
   mem[Var("ms_hard","CMsHardStateGlbls","installed")]=TRUE;
+  mem[Var("ms_hard","CMsHardStateGlbls","irqs_working")]=TRUE;
+  //The capture's CD drive T: has no device here. A drive without its
+  //signature throws 'Drv' (DrvChk, Kernel/BlkDev/DskDrv.HC).
+  if (i=GuestU64(Var("blkdev","CBlkDevGlbls","let_to_drv")+('T'-'A')*8))
+    *(U32 *)(mem+i+Member("CDrv","dv_signature"))=0;
   gr_dc1=Var("gr","CGrGlbls","dc1");
   gr_zoomed_dc=Var("gr","CGrGlbls","zoomed_dc");
   gr_scrn_zoom=Var("gr","CGrGlbls","scrn_zoom");
@@ -297,7 +303,7 @@ U0 WinSize()
     }
     buf_w=w;
     buf_h=h;
-    fd=memfd_create("HEMU",0);
+    fd=memfd_create("HEMU",MFD_CLOEXEC);
     if (fd<0 || ftruncate(fd,w*h*4)<0)
       Die("memfd");
     buf=(U32 *)mmap(NULL,w*h*4,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
@@ -344,6 +350,8 @@ U0 KbdPut(I64 b)
 
 U0 ScPut(I64 sc)
 {//A set 1 scan code: 0x100 more if 0xE0 comes before it.
+  if (kbd_tail-kbd_head>62)
+    return;
   if (sc&0x100)
     KbdPut(0xE0);
   KbdPut(sc&0xFF);
@@ -355,17 +363,6 @@ U0 KbdRpt()
     ScPut(kbd_rpt_key);
     kbd_rpt_ns+=((kbd_type&7)+8<<(kbd_type>>3&3))*(NS_SEC/240);
   }
-}
-
-I64 KbdWait()
-{//Milliseconds until the held key repeats, -1 with no key held.
-  I64 res=-1;
-  if (kbd_rpt_key) {
-    res=(kbd_rpt_ns-Ns())/1000000+1;
-    if (res<0)
-      res=0;
-  }
-  return res;
 }
 
 U0 KeySet(I64 key,Bool down)
@@ -459,11 +456,11 @@ U0 WlEvt(U32 *m)
 	mem[ms_lb]=m[5];
       else if (m[4]==0x111)
 	mem[ms_rb]=m[5];
-    } else if (op==4 && !m[3]) {//axis: time,axis,value
-      if ((I32)m[4]>0)
-	ms_z++;
-      else
-	ms_z--;
+    } else if (op==4 && !m[3]) {//axis: time,axis,value. A wheel's click
+//is 15.0, 3840 in 1/256ths. A touchpad sends a little each frame.
+      ms_wheel+=(I32)m[4];
+      ms_z+=ms_wheel/3840;
+      ms_wheel%=3840;
       *(I64 *)(mem+ms_pos+16)=ms_z;
     }
   } else if (obj==wl_kbd) {
@@ -480,14 +477,17 @@ U0 WinTask()
 {//The window: the compositor's events, TempleOS's finished frames and the
 //held key's repeats.
   U32 in[1024];
-  I64 n=0,i,len;
+  I64 n=0,i,len,wait;
   U64 cnt;
   struct pollfd pfd[2];
   pfd[0].fd=wl;
   pfd[1].fd=scrn_evt;
   pfd[0].events=pfd[1].events=POLLIN;
   while (TRUE) {
-    poll(pfd,2,KbdWait());
+    wait=-1; //Until the held key repeats.
+    if (kbd_rpt_key && (wait=(kbd_rpt_ns-Ns())/1000000+1)<0)
+      wait=0;
+    poll(pfd,2,wait);
     pthread_mutex_lock(&dev_lock);
     KbdRpt();
     if (pfd[0].revents) {
@@ -549,11 +549,6 @@ U0 PalInit()
   }
 }
 
-U0 Ps2Put(I64 b)
-{//An answer to a command: TempleOS polls for it. 0x100 more from the mouse.
-  ps2_q[ps2_tail++&15]=b;
-}
-
 U0 AtaCmd(I64 cmd)
 {//Sectors to read or write. TempleOS sends a 48 bit address high bytes
 //first, so each register keeps its last two bytes.
@@ -612,7 +607,7 @@ I64 Rtc(I64 idx)
 U0 IoIn(I64 port,U8 *data,I64 size)
 {//IN. A port nothing is at reads 0.
   I64 v=0;
-  if (((port|0x80)&~7)==0x1F0) {
+  if ((port&~7)==0x1F0) {
     if ((port&7)==7)
       v=0x40|(ata_len!=0)<<3; //DRDY, and DRQ while sectors are left.
     else if (!(port&7) && !ata_wr && ata_len>=size) {
@@ -624,32 +619,17 @@ U0 IoIn(I64 port,U8 *data,I64 size)
   } else
     switch (port) {
       case 0x60:
-	if (ps2_head!=ps2_tail)
-	  v=ps2_q[ps2_head++&15]&0xFF;
-	else if (kbd_head!=kbd_tail) {
+	if (kbd_head!=kbd_tail) {
 	  v=kbd_q[kbd_head++&63];
 	  if (kbd_head!=kbd_tail)
 	    Irq(1);
 	}
 	break;
       case 0x64:
-	v=0x1C;
-	if (ps2_head!=ps2_tail)
-	  v|=1|ps2_q[ps2_head&15]>>3&0x20;
-	else if (kbd_head!=kbd_tail)
-	  v|=1;
+	v=0x1C|kbd_head!=kbd_tail;
 	break;
       case 0x71:
 	v=Rtc(rtc_idx);
-	break;
-      case 0x92:
-	v=2;
-	break;
-      case 0x3C6:
-	v=0xFF;
-	break;
-      case 0x3C8:
-	v=vga_wr/3;
 	break;
       case 0x3C9:
 	v=vga_dac[vga_rd];
@@ -662,7 +642,7 @@ U0 IoOut(I64 port,U8 *data,I64 size)
 {//OUT.
   I64 v=0;
   memcpy(&v,data,size);
-  if (((port|0x80)&~7)==0x1F0) {
+  if ((port&~7)==0x1F0) {
     if ((port&7)==7)
       AtaCmd(v);
     else if (port&7)
@@ -676,43 +656,10 @@ U0 IoOut(I64 port,U8 *data,I64 size)
   }
   v&=0xFF;
   switch (port) {
-    case 0x60:
-      if (ps2_cfg)
-	ps2_cfg=FALSE;
-      else if (ps2_ms) {
-	ps2_ms=FALSE;
-	Ps2Put(0x1FA);
-	if (v==0xFF) {
-	  Ps2Put(0x1AA);
-	  Ps2Put(0x100);
-	} else if (v==0xF2)
-	  Ps2Put(0x100);
-      } else {
-	Ps2Put(0xFA);
-	if (kbd_cmd) {
-	  if (kbd_cmd==0xF3)
-	    kbd_type=v&0x7F;
-	  kbd_cmd=0;
-	} else if (v==0xF3 || v==0xED)
-	  kbd_cmd=v;
-	else if (v==0xFF) {
-	  kbd_rpt_key=0;
-	  kbd_type=0x2B;
-	  Ps2Put(0xAA);
-	}
-      }
-      break;
-    case 0x64:
-      if (v==0xD4)
-	ps2_ms=TRUE;
-      else if (v==0x60)
-	ps2_cfg=TRUE;
-      else if (v==0x20)
-	Ps2Put(0x47);
-      else if (v==0xA9 || v==0xAB)
-	Ps2Put(0);
-      else if (v==0xAA)
-	Ps2Put(0x55);
+    case 0x60: //The byte after 0xF3 is the repeat's rate and delay.
+      if (kbd_cmd==0xF3)
+	kbd_type=v&0x7F;
+      kbd_cmd=v;
       break;
     case 0x70:
       rtc_idx=v&0x7F;
@@ -918,7 +865,7 @@ U0 PcInit()
   struct kvm_pit_state2 pit;
   struct kvm_irqchip pic;
   I64 i;
-  kvm=open("/dev/kvm",O_RDWR);
+  kvm=open("/dev/kvm",O_RDWR|O_CLOEXEC);
   if ((vm=ioctl(kvm,KVM_CREATE_VM,0))<0)
     Die("/dev/kvm");
   ioctl(vm,KVM_SET_TSS_ADDR,0xFFFBD000);
@@ -937,15 +884,12 @@ U0 PcInit()
     pic.chip.pic.imr=0xF8;
     if (i)
       pic.chip.pic.imr=0xEF;
-    pic.chip.pic.init4=1;
     ioctl(vm,KVM_SET_IRQCHIP,&pic);
   }
   ioctl(vm,KVM_GET_PIT2,&pit);
   pit.channels[0].count=65536*182/10/1000;
   pit.channels[0].mode=2;
-  pit.channels[0].rw_mode=pit.channels[0].read_state=
-	pit.channels[0].write_state=3;
-  pit.channels[0].gate=1;
+  pit.channels[0].rw_mode=3;
   ioctl(vm,KVM_SET_PIT2,&pit);
 }
 
@@ -965,6 +909,7 @@ int main(int,char **argv)
   mem=FileMap("RAM.BIN",&mem_size);
   dsk=FileMap("Disk.BIN",&dsk_size);
   regs=(char *)FileMap("Regs.TXT",&size);
+  regs=strndup(regs,size); //With the zero that ends a text.
   PcInit();
   id=(struct kvm_cpuid2 *)calloc(1,sizeof(*id)+
 	128*sizeof(struct kvm_cpuid_entry2));
@@ -972,14 +917,13 @@ int main(int,char **argv)
   ioctl(kvm,KVM_GET_SUPPORTED_CPUID,id);
   for (blk=regs;(blk=strstr(blk,"CPU#")) && n<CORES_NUM;blk++)
     CoreNew(n++,blk,id);
-  scrn_evt=eventfd(0,0);
+  scrn_evt=eventfd(0,EFD_CLOEXEC);
   SymInit(Reg(regs,"FS =",1));
   PalInit();
-  ScrnGet();
   addr.sun_family=AF_UNIX;
   snprintf(addr.sun_path,sizeof(addr.sun_path),"%s/%s",
 	getenv("XDG_RUNTIME_DIR"),getenv("WAYLAND_DISPLAY"));
-  wl=socket(AF_UNIX,SOCK_STREAM,0);
+  wl=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);
   if (connect(wl,(struct sockaddr *)&addr,sizeof(addr))<0)
     Die("Wayland");
   Wl(1,1,"u",wl_reg=wl_id++); //get_registry
