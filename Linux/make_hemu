@@ -1,0 +1,60 @@
+#!/bin/bash
+
+#Make HEMU for this user: the program and the four-core capture in
+#~/.local/share/HEMU, TempleOS in the launcher, and SUPER+ALT+T under
+#Hyprland.
+
+set -e
+cd "$(dirname "$0")"
+D=~/.local/share/HEMU
+mkdir -p $D ~/.local/share/applications
+
+echo Make HEMU
+cc -O2 HEMU.CPP -o $D/HEMU -lasound
+zcat ../live-smp.bin.gz | cp --sparse=always /dev/stdin $D/RAM.BIN
+cp ../capture-smp.txt $D/Regs.TXT
+
+#The disk: the qcow2's clusters laid flat, then the sectors the capture
+#had changed, each a 32 bit block number and its 512 bytes.
+python3 - ../templeos-hd.qcow2.gz ../stock-smp.disk $D/Disk.BIN <<'PY'
+import gzip,struct,sys
+q=gzip.open(sys.argv[1]).read()
+bits,size,crypt,l1_cnt,l1=struct.unpack_from('>IQIIQ',q,20)
+with open(sys.argv[3],'wb') as f:
+  f.truncate(size)
+  for i in range(l1_cnt):
+    l2=struct.unpack_from('>Q',q,l1+i*8)[0]&0xFFFFFFFFFFFE00
+    for j in range(l2 and 1<<bits-3):
+      c=struct.unpack_from('>Q',q,l2+j*8)[0]
+      assert not c>>62&1,'compressed cluster'
+      c&=0xFFFFFFFFFFFE00
+      if c:
+        f.seek((i<<bits-3|j)<<bits)
+        f.write(q[c:c+(1<<bits)])
+  o=open(sys.argv[2],'rb').read()
+  for i in range(0,len(o),516):
+    f.seek(struct.unpack_from('<I',o,i)[0]*512)
+    f.write(o[i+4:i+516])
+PY
+
+cat >~/.local/share/applications/HEMU.desktop <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=TempleOS
+Comment=TempleOS V5.03 on this processor
+Exec=$D/HEMU
+Categories=System;Emulator;
+StartupWMClass=HEMU
+DESKTOP
+
+if [ -f ~/.config/hypr/hyprland.lua ]; then
+  cat >~/.config/hypr/hemu.lua <<LUA
+hl.bind("SUPER + ALT + T", hl.dsp.exec_cmd("$D/HEMU"), {
+  description = "TempleOS",
+})
+LUA
+  grep -q hypr.hemu ~/.config/hypr/hyprland.lua || echo \
+	'if package.searchpath("hypr.hemu", package.path) then require("hypr.hemu") end' \
+	>>~/.config/hypr/hyprland.lua
+fi
+echo Done.

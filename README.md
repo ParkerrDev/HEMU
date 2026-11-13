@@ -1,22 +1,19 @@
-# HEMU: a TempleOS x86-64 emulator in HolyC
+# HEMU: TempleOS V5.03 from a capture
 
-HEMU runs the unmodified TempleOS V5.03 kernel from a saved RAM image. It is written entirely in HolyC and
-reaches the outside world through one small host contract, so any HolyC compiler whose runtime implements
-that contract can build and run it. [HolyC-wasm](https://github.com/ParkerrDev/HolyC-wasm) compiles it to
-WebAssembly, and [TempleOS-Web](https://github.com/ParkerrDev/TempleOS-Web) is a complete host for that
-build - its `engine/` implements the contract (with an x86→WASM block JIT), its `tools/hemu/` are the
-harnesses, and its `tools/snapshot/` are the recipes that produce the boot snapshots kept here.
+HEMU resumes a captured, already booted TempleOS V5.03 desktop, unmodified. It does not execute the
+DVD's 16-bit BIOS loader or install from disk. There are two machines for the capture:
 
-This repository is HolyC source and the snapshots it boots. Nothing else.
+- `Linux/`: on an x86-64 Linux the processor runs TempleOS itself, through KVM. One C file is the rest
+  of the PC, in a Wayland window. It opens in about 10 ms. See [Linux](#linux).
+- `src/`: anywhere else, an x86-64 emulator written entirely in HolyC. It reaches the outside world
+  through one small host contract, so any HolyC compiler whose runtime implements that contract can
+  build and run it. [HolyC-wasm](https://github.com/ParkerrDev/HolyC-wasm) compiles it to WebAssembly,
+  and [TempleOS-Web](https://github.com/ParkerrDev/TempleOS-Web) is a complete host for that build in a
+  browser: its `engine/` implements the contract (with an x86 to WASM block JIT), its `tools/hemu/` are
+  the harnesses, and its `tools/snapshot/` are the recipes that produce the captures kept here.
 
-Startup resumes a captured, already booted 64-bit TempleOS desktop. It does not
-execute the DVD's 16-bit BIOS loader or perform a fresh installation from disk.
-The small `boot.HC` framebuffer kernel is an instruction/device fixture, not a
-TempleOS cold-boot test. TempleOS-Web hosts it in a browser window, and its
-`engine/native` hosts it in a native Qt window on Linux x86-64, where
-JavaScriptCore runs this WASM build and the block JIT on one core. macOS and
-other CPUs are not qualified yet. The native HolyC test adapter is headless,
-with no desktop or JIT of its own.
+The small `boot.HC` framebuffer kernel is an instruction and device fixture, not a TempleOS cold-boot
+test. The HolyC test adapter that runs under original V5.03 is headless.
 
 ## Layout
 
@@ -39,6 +36,47 @@ with no desktop or JIT of its own.
 | `stock.json`, `stock.disk`, `stock-smp.disk` | validated capture identities and exact paired disk sector overlays |
 | `capture.txt`, `capture-smp.txt` | original stopped native CPU register dumps, including FPU/XMM state |
 | `live.bin.gz`, `live-smp.bin.gz` | the booted-desktop RAM snapshots the entries resume (384 MiB flat images, gzipped) |
+| `templeos-hd.qcow2.gz` | the base disk both captures were taken on (`stock.json` has its hashes; TempleOS-Web still serves its own copy of the same bytes from `vendor/images/`) |
+| `Linux/HEMU.CPP`, `Linux/make_hemu` | the KVM machine and the script that builds and installs it |
+
+## Linux
+
+`Linux/HEMU.CPP` runs the capture on the processor it was made for. It maps the captured RAM, loads
+each captured processor's registers from the same `capture-smp.txt` dump into a KVM virtual CPU, and
+answers the ports TempleOS uses: the PS/2 keyboard, the ATA disk, the CMOS clock, the VGA palette and
+map mask, and the HPET's counter. The PIC, the PIT, the APICs and the speaker's gate are Linux's own.
+It finds TempleOS's mouse, screen and clock variables by name in the guest's hash table, as `src/sym.HC`
+does. It uses no toolkit: KVM by ioctl, the window by the Wayland wire protocol on its socket, and ALSA
+for the speaker's square wave. There is no compiler, emulator or script engine between TempleOS and
+the processor.
+
+```sh
+Linux/make_hemu
+```
+
+This needs `cc`, `python3`, alsa-lib's headers and access to `/dev/kvm`, all of which a stock Omarchy
+has. It puts the program, the four-core capture's RAM and registers and its disk in
+`~/.local/share/HEMU`, adds TempleOS to the launcher, and under Hyprland binds SUPER+ALT+T to it
+(`~/.config/hypr/hemu.lua`, loaded by one line added to `hyprland.lua`). To remove it, delete those
+two, that line and `~/.local/share/applications/HEMU.desktop`.
+
+- The screen is 640x480 at the largest whole zoom that fits the window, in the monitor's own pixels.
+- The frame is taken when TempleOS writes the VGA map mask for a frame's first plane, the moment it
+  has finished one, so a frame is never shown half drawn. It runs at TempleOS's own 30 frames a second.
+- The pointer is TempleOS's mouse, and keys are sent as the set 1 scan codes of the same physical
+  keys, with the keyboard's own typematic repeat. Keys with SUPER held stay Hyprland's.
+- `Reboot` and a triple fault start the capture again. Closing the window ends the machine.
+- RAM and disk are private copies of the capture: what TempleOS writes is gone when HEMU ends, as on a
+  reload of TempleOS-Web.
+- With `capture.txt`, `live.bin.gz` and `stock.disk` in place of the four-core files, the same program
+  runs the one-core capture: it makes one processor for each block of the register dump.
+- It is for x86-64 with KVM and Wayland only. Another CPU, macOS or a host without KVM uses the HolyC
+  emulator in `src/`.
+
+Measured on an i9-14900HX under Hyprland: the first frame is committed 7 to 10 ms after the program
+starts; TempleOS's `CPURep` reports "004 Cores 2.418GHz"; `Demo/MultiCore/MPPrint` prints from all four
+cores; `Demo/Games/CastleFrankenstein` holds FPS:30 with one host core about 5 percent busy; `Snd(60)`
+and `Beep` come out at 437 and 491 Hz.
 
 ## Stock capture identity
 
