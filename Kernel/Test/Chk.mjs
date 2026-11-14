@@ -34,6 +34,7 @@ if(args.has("--full"))for(const path of ["WorkerLegacyFault.test.mjs","WorkerSna
 if(args.has("--desktop"))for(const cores of [1,4])
   Run("Kernel/Test/Desktop.test.mjs",{HEMU_DESKTOP_CORES:String(cores)});
 if(args.has("--desktop")) {
+  Run("Kernel/Test/SpeakerAudio.test.mjs");
   Run("Kernel/Test/DesktopLifecycle.test.mjs");
   Run("Kernel/Test/MachineDisk.test.mjs");
 }

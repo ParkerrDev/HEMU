@@ -15,7 +15,8 @@ export function Speaker()
     let at=origin===null?-1:origin+ns/1e9;
     if (at<now || at>now+SLACK) {
       origin=now+LEAD-ns/1e9;
-      at=now+LEAD;
+      //Floating-point cancellation must not reorder equal guest timestamps.
+      at=origin+ns/1e9;
     }
     return at;
   }
