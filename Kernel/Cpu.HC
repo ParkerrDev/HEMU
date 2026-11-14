@@ -1,13 +1,13 @@
-#include "host.HC"                  // the host contract: every import hemu makes (see host.HC)
-#include "core.HC"                  // per-core CPU state + SMP/guest-call scaffolding shared by every entry
+#include "Host"                  // the host contract: every import hemu makes (see Host.HC)
+#include "Core"                  // per-core CPU state + SMP/guest-call scaffolding shared by every entry
 
 U8 *mem;                            // guest RAM (MAlloc'd so the snapshot can use 100s of MB)
 U64 mem_size;                       // bytes of guest RAM; anything >= this is MMIO (LAPIC/HPET/IOAPIC)
 U8 g_pfx[256];                       // prefix-byte lookup (1 = legacy prefix) - skips an 11-way compare per instr
-#include "sym.HC" //HEMU finds what it needs in the guest by name.
+#include "Sym" //HEMU finds what it needs in the guest by name.
 
 // PER-CORE state (reg/rip/rfl/halted/irq_stall/fpu/seg/decode/icount) lives in CCpuState g_cpu_st[] - defined
-// in core.HC (included above), accessed through #define reg CST.f_reg etc. (CST = this instance's MyCore
+// in Core.HC (included above), accessed through #define reg CST.f_reg etc. (CST = this instance's MyCore
 // slot). SHARED state (mem, devices, JIT cache, clocks, cr*, idtr/gdtr) stays below.
 U64 g_hle_blit;                      // entry addr of the transparent compositor blit to run natively (0=off)
 U8 *g_desk;                          // last COMPLETE frame (desktop + the OS's own cursor), captured tear-free
@@ -26,8 +26,8 @@ U64 g_badop;
 // system state: control regs, descriptor tables, MSRs, TSC, code/stack segments
 U64 cr0, cr2, cr3, cr4, cr8, g_cs, g_ss; U64 idtr_base, idtr_limit, gdtr_base, gdtr_limit;
 U64 msr_efer, msr_star, msr_lstar, msr_sfmask, msr_kgsbase, msr_apic;   // msr_fsbase/msr_gsbase moved into CCpuState (per-core)
-U64 g_xmm_lo[NCORES][16], g_xmm_hi[NCORES][16];   // SSE XMM registers - PER-CORE (xmm_lo/xmm_hi #defines in core.HC): an AP suspended mid-XMM must not be clobbered by another core
-I64 g_lockf[NCORES];                  // PER-CORE: 1 = the current instruction had a 0xF0 LOCK prefix (lockf #define in core.HC) - makes the RMW atomic on shared memory
+U64 g_xmm_lo[NCORES][16], g_xmm_hi[NCORES][16];   // SSE XMM registers - PER-CORE (xmm_lo/xmm_hi #defines in Core.HC): an AP suspended mid-XMM must not be clobbered by another core
+I64 g_lockf[NCORES];                  // PER-CORE: 1 = the current instruction had a 0xF0 LOCK prefix (lockf #define in Core.HC) - makes the RMW atomic on shared memory
 #include "Dev"
 
 #define F_CF 0x0001
@@ -80,7 +80,7 @@ U0 WrReg(I64 i, I64 sz, U64 v)
   if (!hasRex && i >= 4 && i < 8) { reg[i - 4] = (reg[i - 4] & ~0xFF00) | ((v & 0xFF) << 8); return; }
   reg[i] = (reg[i] & ~0xFF) | (v & 0xFF); }
 
-#include "Alu.HC"
+#include "Alu"
 
 //---------------------------------------------------------------- ModRM + SIB
 // immlen = number of immediate bytes that follow this instruction's disp. It only
@@ -120,7 +120,7 @@ U64 RdRM(I64 sz) { if (isMem) return RdMem(ea, sz); return RdReg(rm, sz); }
 U0  WrRM(I64 sz, U64 v) { if (isMem) WrMem(ea, sz, v); else WrReg(rm, sz, v); }
 
 #include "Atom"
-#include "Shift.HC"
+#include "Shift"
 
 //---------------------------------------------------------------- SHLD / SHRD
 U0 DoShld(I64 isLeft, U64 src, I64 cnt, I64 sz)
@@ -365,7 +365,7 @@ U0 CaptureFrom(U64 bd)
   }
 }
 
-#include "video.HC"
+#include "Video"
 
 U0 CaptureDesk()
 {//Capture after GrUpdateVGAGraphics has committed the OS screen image.
@@ -582,7 +582,7 @@ U0 Step()
 
     default: g_badop = op; halted = 2; "BADOP op=%X rip=%X b=%X %X %X %X\n", op, rip, mem[rip-2], mem[rip-1], mem[rip], mem[rip+1]; break; } }
 
-#include "guestcall.HC"               // host-injected guest calls (backend execution API); needs Step(), hooks into Run() below
+#include "GuestCall"               // host-injected guest calls (backend execution API); needs Step(), hooks into Run() below
 
 U0 RunTo(U64 target,I64 budget)
 {//Interpret until target, a fault, or budget instructions have run.

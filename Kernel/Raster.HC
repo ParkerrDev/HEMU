@@ -218,7 +218,7 @@ sf_done:
   g_raster_calls++;
   return res;
 }
-#include "poly"
+#include "Poly"
 
 I64 PolyDone(I64 cnt)
 {//Return from GrFillPoly3, discarding its three stack arguments.

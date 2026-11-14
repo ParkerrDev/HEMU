@@ -1,7 +1,7 @@
 {
   "version": 1,
   "base": {
-    "file": "../vendor/images/templeos-hd.qcow2.gz",
+    "file": "templeos-hd.qcow2.gz",
     "gzipSha256": "ca12b5604c2f1d9fe83a7f910ce131f0bf074e1d33f24aa68fd4fad34198d148",
     "decodedBytes": 66715648,
     "rawSha256": "f8673e751d7e313b6552ac5688c31a4ea19148326a7d560b103217f004e1322a",

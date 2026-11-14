@@ -1,4 +1,4 @@
-#include "cpu.HC"
+#include "Cpu"
 
 I64 g_pass, g_fail, g_total;
 U0 Go(I64 maxi)

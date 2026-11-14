@@ -1,5 +1,5 @@
 //============================================================================
-// host.HC - hemu's host contract: everything the emulator needs from whatever runs it.
+// Host.HC - hemu's host contract: everything the emulator needs from whatever runs it.
 //
 // hemu is plain HolyC. It touches the outside world only through the functions declared here, so a
 // host (a compiler's runtime + the program that drives the frame loop) supplies these and nothing
@@ -10,11 +10,11 @@
 // Everything else hemu calls is standard HolyC that any runtime provides (MAlloc, Pow/Sin/Ln,
 // printing) plus two compiler intrinsics, listed at the end.
 //
-// (Parameter names here deliberately avoid snapshot.HC's #define'd register names - reg, rip, rfl,
+// (Parameter names here deliberately avoid Snapshot.HC's #define'd register names - reg, rip, rfl,
 // fpr, fsp, x87_cw, xmm_lo... - which would otherwise expand inside these prototypes.)
 //
 // The frame model: the host calls Main once per display frame (holyc-wasm exports it as __main;
-// snapshot.HC keeps its state in globals between calls). A host that runs Main only once should call
+// Snapshot.HC keeps its state in globals between calls). A host that runs Main only once should call
 // HemuInit once and then call Frame per display frame itself.
 //============================================================================
 

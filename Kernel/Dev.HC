@@ -4,8 +4,8 @@ U8 *ata_buf;
 I64 pic1_base,pic1_mask,pic1_irr,pic1_isr,pic1_initstep,
       pic2_base,pic2_mask,pic2_irr,pic2_isr,pic2_initstep,irq_count;
 extern U0 KbdTick();
-#include "time"
-#include "keyboard"
+#include "Time"
+#include "Kbd"
 
 I64 rtc_idx,ms_byte0,ms_byte1,ms_byte2,ms_has,ms_phase,
       ps2q[16],ps2q_ms[16],ps2qh,ps2qt,ms_next,cfg_next,
@@ -198,7 +198,7 @@ U0 IoOut(U64 port,U64 v)
     if (!(vga_write_pos%3) && i<16) VgaPaletteSend(i);
     return;
   }
-  if (0x3B0<=port<=0x3DF) return; //Planar framebuffer writes use video.HC.
+  if (0x3B0<=port<=0x3DF) return; //Planar framebuffer writes use Video.HC.
   if (port==0x1F0 || port==0x170) {
     if (ata_wr && ata_words) {
       *(ata_buf+ata_pos)(U16 *)=v;

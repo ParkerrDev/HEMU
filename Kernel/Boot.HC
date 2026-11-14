@@ -1,9 +1,9 @@
 //============================================================================
-// boot.HC - hemu boot/demo entry. Runs a real x86-64 kernel (compiled by clang)
+// Boot.HC - hemu boot/demo entry. Runs a real x86-64 kernel (compiled by clang)
 // inside the hemu CPU, then presents the guest framebuffer to the host (canvas).
 // This is the integration scaffolding the TempleOS snapshot will reuse.
 //============================================================================
-#include "cpu.HC"
+#include "Cpu"
 
 #define FB 0x200000          // framebuffer at guest-physical 2 MiB (640*480 bytes)
 

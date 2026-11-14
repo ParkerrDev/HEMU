@@ -5,34 +5,34 @@ DVD's 16-bit BIOS loader or install from disk. There are two machines for the ca
 
 - `Linux/`: on an x86-64 Linux the processor runs TempleOS itself, through KVM. One C file is the rest
   of the PC, in a Wayland window. It opens in about 10 ms. See [Linux](#linux).
-- `src/`: anywhere else, an x86-64 emulator written entirely in HolyC. It reaches the outside world
+- `Kernel/`: anywhere else, an x86-64 emulator written entirely in HolyC. It reaches the outside world
   through one small host contract, so any HolyC compiler whose runtime implements that contract can
   build and run it. [HolyC-wasm](https://github.com/ParkerrDev/HolyC-wasm) compiles it to WebAssembly,
   and [TempleOS-Web](https://github.com/ParkerrDev/TempleOS-Web) is a complete host for that build in a
-  browser: its `engine/` implements the contract (with an x86 to WASM block JIT), its `tools/hemu/` are
-  the harnesses, and its `tools/snapshot/` are the recipes that produce the captures kept here.
+  browser: its `Kernel/` implements the contract (with an x86 to WASM block JIT), its `Kernel/Test/` are
+  the harnesses, and its `Kernel/Snapshot/` are the recipes that produce the captures kept here.
 
-The small `boot.HC` framebuffer kernel is an instruction and device fixture, not a TempleOS cold-boot
+The small `Boot.HC` framebuffer kernel is an instruction and device fixture, not a TempleOS cold-boot
 test. The HolyC test adapter that runs under original V5.03 is headless.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `src/cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses, and the HLE hooks |
-| `src/Dev.HC`, `src/time.HC`, `src/keyboard.HC` | device state, port I/O, interrupt selection, elapsed clocks and PS/2 keyboard behavior |
-| `src/Mem.HC` | unaligned RAM reads/writes, the guest RAM alias, and saved-guest MMIO/IPI routing |
-| `src/Fpu.HC`, `src/Alu.HC`, `src/MulDiv.HC`, `src/Shift.HC`, `src/Atom.HC` | scalar floating-point, integer arithmetic, full multiply/divide, shifts and supported atomic operations |
-| `src/Except.HC` | bounded long-mode divide exception delivery to the current ring-zero code segment and stack |
-| `src/CpuId.HC` | the explicit virtual CPU identification and capability contract, independent of the host machine |
-| `src/Raster.HC`, `src/poly.HC`, `src/video.HC` | source-derived drawing acceleration, integer triangle edge walks and VGA conversion |
-| `src/host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |
-| `src/core.HC` | per-core CPU state (`CCpuState g_cpu_st[]` behind the `reg` / `rip` / `rfl` accessors) and the SMP and guest-call scaffolding every entry shares |
-| `src/guestcall.HC` | host-injected guest calls, the backend execution primitive (below) |
-| `src/snapshot.HC` | the TempleOS entry: resume from the RAM snapshot, HLE of the hot render routines, wall-clock pacing. `HemuInit` once, then `Frame` per display frame |
-| `src/snapregs.HC`, `src/snapregs-smp.HC` | generated: the register state captured together with the RAM snapshot (single-core / four-core) |
-| `src/boot.HC`, `src/anim.HC` | small demo entries that run a clang-compiled kernel inside the emulator |
-| `src/test.HC` | the self-checking instruction battery (`#include "cpu.HC"`; prints pass / fail counts) |
+| `Kernel/Cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses, and the HLE hooks |
+| `Kernel/Dev.HC`, `Kernel/Time.HC`, `Kernel/Kbd.HC` | device state, port I/O, interrupt selection, elapsed clocks and PS/2 keyboard behavior |
+| `Kernel/Mem.HC` | unaligned RAM reads/writes, the guest RAM alias, and saved-guest MMIO/IPI routing |
+| `Kernel/Fpu.HC`, `Kernel/Alu.HC`, `Kernel/MulDiv.HC`, `Kernel/Shift.HC`, `Kernel/Atom.HC` | scalar floating-point, integer arithmetic, full multiply/divide, shifts and supported atomic operations |
+| `Kernel/Except.HC` | bounded long-mode divide exception delivery to the current ring-zero code segment and stack |
+| `Kernel/CpuId.HC` | the explicit virtual CPU identification and capability contract, independent of the host machine |
+| `Kernel/Raster.HC`, `Kernel/Poly.HC`, `Kernel/Video.HC` | source-derived drawing acceleration, integer triangle edge walks and VGA conversion |
+| `Kernel/Host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |
+| `Kernel/Core.HC` | per-core CPU state (`CCpuState g_cpu_st[]` behind the `reg` / `rip` / `rfl` accessors) and the SMP and guest-call scaffolding every entry shares |
+| `Kernel/GuestCall.HC` | host-injected guest calls, the backend execution primitive (below) |
+| `Kernel/Snapshot.HC` | the TempleOS entry: resume from the RAM snapshot, HLE of the hot render routines, wall-clock pacing. `HemuInit` once, then `Frame` per display frame |
+| `Kernel/SnapRegs.HC`, `Kernel/SnapRegsSmp.HC` | generated: the register state captured together with the RAM snapshot (single-core / four-core) |
+| `Kernel/Boot.HC`, `Kernel/Anim.HC` | small demo entries that run a clang-compiled kernel inside the emulator |
+| `Kernel/Test.HC` | the self-checking instruction battery (`#include "Cpu.HC"`; prints pass / fail counts) |
 | `stock.json`, `stock.disk`, `stock-smp.disk` | validated capture identities and exact paired disk sector overlays |
 | `capture.txt`, `capture-smp.txt` | original stopped native CPU register dumps, including FPU/XMM state |
 | `live.bin.gz`, `live-smp.bin.gz` | the booted-desktop RAM snapshots the entries resume (384 MiB flat images, gzipped) |
@@ -45,7 +45,7 @@ test. The HolyC test adapter that runs under original V5.03 is headless.
 each captured processor's registers from the same `capture-smp.txt` dump into a KVM virtual CPU, and
 answers the ports TempleOS uses: the PS/2 keyboard, the ATA disk, the CMOS clock, the VGA palette and
 map mask, and the HPET's counter. The PIC, the PIT, the APICs and the speaker's gate are Linux's own.
-It finds TempleOS's mouse, screen and clock variables by name in the guest's hash table, as `src/sym.HC`
+It finds TempleOS's mouse, screen and clock variables by name in the guest's hash table, as `Kernel/Sym.HC`
 does. It uses no toolkit: KVM by ioctl, the window by the Wayland wire protocol on its socket, and ALSA
 for the speaker's square wave. There is no compiler, emulator or script engine between TempleOS and
 the processor.
@@ -76,7 +76,7 @@ two, that line and `~/.local/share/applications/HEMU.desktop`.
 - With `capture.txt`, `live.bin.gz` and `stock.disk` in place of the four-core files, the same program
   runs the one-core capture: it makes one processor for each block of the register dump.
 - It is for x86-64 with KVM and Wayland only. Another CPU, macOS or a host without KVM uses the HolyC
-  emulator in `src/`.
+  emulator in `Kernel/`.
 
 Measured on an i9-14900HX under Hyprland: the first frame is committed 7 to 10 ms after the program
 starts; TempleOS's `CPURep` reports "004 Cores 2.418GHz"; `Demo/MultiCore/MPPrint` prints from all four
@@ -99,11 +99,11 @@ architectural 80-bit x87 values or tags. The raw native register dumps remain
 available for audit. Initial PIC/PIT/RTC state is still synthesized by the
 existing startup policy, not captured from QEMU; all CPUs being halted does
 not establish device-state equivalence. See TempleOS-Web's
-`tools/snapshot/README.md` for the independent capture and validation commands.
+`Kernel/Snapshot/README.md` for the independent capture and validation commands.
 
 ## The host contract
 
-`src/host.HC` is the whole interface. Required: load the snapshot into guest RAM, present a frame, VGA
+`Kernel/Host.HC` is the whole interface. Required: load the snapshot into guest RAM, present a frame, VGA
 palette writes, ATA sector reads and writes, mouse and keyboard state, wall-clock pacing, a speaker tone.
 Speaker updates use the required `__host_snd(F64 hz,U64 ns)` import. Zero Hz
 means silence; `ns` is the observed emulated TSC in nanoseconds, including on
@@ -152,30 +152,30 @@ time; `Frame` pulls input, runs the instruction budget the host asked for, and p
 
 ## Building and running
 
-With holyc-wasm, compile `src/snapshot.HC` in strict mode (every `import` prototype in `host.HC` becomes a
+With holyc-wasm, compile `Kernel/Snapshot.HC` in strict mode (every `import` prototype in `Host.HC` becomes a
 WebAssembly import) and export what your host calls back into; then implement the contract on top of
-holyc-wasm's `createHost()`. TempleOS-Web does exactly this: `engine/compile.js` and `engine/build.mjs` are
-the build, `engine/host.js` the host, `engine/jit.js` the optional JIT. From that checkout, with this one
+holyc-wasm's `createHost()`. TempleOS-Web does exactly this: `Kernel/Compile.js` and `Kernel/Build.mjs` are
+the build, `Kernel/Host.js` the host, `Kernel/Jit.js` the optional JIT. From that checkout, with this one
 cloned or symlinked beside it as `hemu`:
 
 ```sh
-node engine/build.mjs build                    # hemu.wasm + hemu-smp.wasm + hemu-smp.json
-node tools/hemu/measure.mjs                    # src/test.HC, the self-checking battery, headless
-node tools/hemu/boot-test.mjs                  # src/boot.HC: the demo kernel draws its framebuffer
+node Kernel/Build.mjs build                    # hemu.wasm + hemu-smp.wasm + hemu-smp.json
+node Kernel/Test/Measure.mjs                    # Kernel/Test.HC, the self-checking battery, headless
+node Kernel/Test/BootTest.mjs                  # Kernel/Boot.HC: the demo kernel draws its framebuffer
 ```
 
 The guest harnesses - boot the desktop, run catalog games, compare the JIT against the interpreter,
-exercise the guest-execution API - are in the same `tools/hemu/`, documented in `engine/README.md`.
+exercise the guest-execution API - are in `Kernel/Test/`, documented in `Kernel/README.md`.
 
 ## Backend guest execution
 
-`src/guestcall.HC` lets the host call one validated guest function with up to eight stack arguments exactly
+`Kernel/GuestCall.HC` lets the host call one validated guest function with up to eight stack arguments exactly
 the way a hardware interrupt enters a handler: at an instruction boundary with IF=1, a frame is pushed on
 the current task's stack, the callee runs with IF=0, and when it returns to the sentinel address the
 interrupted CPU state is restored bit-exactly. The callee's side effects on guest memory persist; nothing
 else does. This is the discipline TempleOS itself uses for IRQ1, so the JobQue family (TaskExe, JobResScan,
 PopUp) is safe by construction. Only core 0 injects; a callee that faults or exceeds its budget is reported
-as failed and the interrupted state is still restored. TempleOS-Web's `engine/guestexec.js` is the host-side
+as failed and the interrupted state is still restored. TempleOS-Web's `Kernel/GuestExec.js` is the host-side
 API over it (`exec`, `include`, `mkdir`, `writeFile`, `launch`).
 
 ## Devices and performance
@@ -203,9 +203,9 @@ the VGA planes through that same alias, at alias+0xA0000. Decoding by page
 offset alone once made pixel stores at offset 0x300 send IPIs whose vector
 was pixel data; an exception vector crashed an AP, and the BSP, left in
 single-user mode, ran only the window manager. Those stores are now ignored
-(TempleOS-Web `tools/hemu/mmio-alias.test.mjs`).
+(TempleOS-Web `Kernel/Test/MmioAlias.test.mjs`).
 
-`src/Atom.HC` owns memory read/modify/write operations, including implicit-lock
+`Kernel/Atom.HC` owns memory read/modify/write operations, including implicit-lock
 XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG/8B/16B and bit changes.
 Aligned operands up to eight bytes, including the TempleOS RAM alias, use
 sequentially consistent host atomics.
@@ -289,8 +289,20 @@ game playthroughs.
 ## Snapshots
 
 The RAM images are captured from TempleOS booted under QEMU with the machine paused, together with the
-register state that becomes `src/snapregs*.HC`; the two must match, so re-bake the registers after every
-capture. The recipes live in TempleOS-Web's `tools/snapshot/`. The stock
+register state that becomes `Kernel/SnapRegs*.HC`; the two must match, so re-bake the registers after every
+capture. HEMU owns the disk, RAM, registers, overlays and their `stock.json`
+manifest. `Misc/Regs.mjs` parses the captured registers, and the same generator
+handles either CPU count:
+
+```sh
+node Misc/RegsMk.mjs capture.txt
+node Misc/RegsMk.mjs capture-smp.txt
+```
+
+`Misc/Pack.py` packages verified native captures with their base disk and
+generated sources under `Kernel/`. The capture recipes live in TempleOS-Web's
+`Kernel/Snapshot/`; the site reads the resulting files from its HEMU mount.
+The stock
 images stop at TempleOS's own "Take Tour(y or n)?" question, so a visitor answers it, as on a
 fresh install.
 
@@ -298,4 +310,4 @@ The web host can also save and restore a complete live machine. Its versioned
 container includes the exact compiled engine, every core and device's state,
 guest memory, host input/settings, and the full current disk. SnapshotResume
 reconnects the host JIT and displays the saved frame without resetting the CPU.
-See TempleOS-Web/tools/hemu/README.md for the format and round-trip tests.
+See TempleOS-Web/Kernel/Test/README.md for the format and round-trip tests.
