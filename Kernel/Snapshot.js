@@ -16,6 +16,7 @@ function HeaderCheck(m)
       new Set(m.guestPatches).size!==m.guestPatches.length) Fail("unsupported guest patches");
   if (m.heapAbi===undefined) m.heapAbi=0;
   if (![0,1].includes(m.heapAbi)) Fail("unsupported allocator ABI");
+  if (m.fast!==undefined && typeof m.fast!=="boolean") Fail("bad graphics mode");
   if (![1,4].includes(m.cores) || !Int(m.memoryBytes,32*1024*1024,512*1024*1024) || m.memoryBytes%PAGE ||
       !Int(m.wasmBytes,8,2*1024*1024) || !Int(m.diskBytes,512,1024*1024*1024) || m.diskBytes%512 ||
       !Int(m.heapPtr,1,m.memoryBytes) || !Int(m.base,1,m.memoryBytes-402653184) ||

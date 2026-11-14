@@ -12,6 +12,7 @@ windows and controls. HEMU's standalone `Desktop/` uses the same runtime.
 | `Compile.js` | `compileHemu()`: strict compilation of HEMU with the exports the host calls |
 | `Build.mjs` | writes `hemu.wasm`, `hemu-smp.wasm` and the SMP mailbox metadata to `build/` |
 | `Host.js` | `createHemuHost()`: HolyC-wasm's `createHost()` plus the imports declared in `Host.HC` |
+| `Render.HC` | optional fast graphics with complete stock-code guards; `RenderFastSet` selects original drawing instructions |
 | `Jit.js` | compiles guest instructions into WASM blocks; registers stay in locals, flags are lazy, and a WASM dispatcher chains blocks |
 | `GuestExec.js` | resolves guest symbols and exposes queued execution, inclusion, file writing and task launches over `GuestCall.HC` |
 | `GuestInput.js`, `KeyQueue.js` | guest mouse metadata, relative motion and IRQ1 keyboard delivery |
@@ -67,7 +68,9 @@ available. Omitted bindings use unconfigured defaults instead of earlier
 addresses. An unregistered FS/GS base ends the compiled prefix so the
 interpreter owns the instruction; a registered base whose value is zero remains
 a valid compiled operand. `jitReset` alone
-clears code caches while retaining the current owner. `JitOwner.test.mjs`
+clears code caches while retaining the current owner. Only the BSP binds its
+WASM dispatch table to the engine's block metadata; APs retain private code
+caches and consult the same graphics mode before executing a cached block. `JitOwner.test.mjs`
 checks that missing handlers and setup cannot access a previous owner's memory.
 
 `GuestInput.js` applies relative mouse deltas once from the guest's current position, respecting games that

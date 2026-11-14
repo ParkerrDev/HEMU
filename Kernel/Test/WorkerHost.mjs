@@ -146,7 +146,7 @@ export async function HemuBoot(opt)
   h.workers[0].on("error",WorkerFail);
   h.workers[0].on("error",()=>{if(opt.busProtocol===BUS_VERSION&&h.ctrl)BusStop(h.ctrl);});
   h.workers[0].on("exit",()=>{if(opt.busProtocol===BUS_VERSION&&h.ctrl&&!h.stopping)BusStop(h.ctrl);});
-  init={cmd:"init",gz:gz,wasmUrl:new URL(wasm,ROOT).href,fixedB:opt.fixed_b||0,
+  init={cmd:"init",gz:gz,wasmUrl:new URL(wasm,ROOT).href,fixedB:opt.fixed_b||0,fast:opt.fast,
 	diskBytes:null};
   if (opt.smp) {
     sc=opt.engineMeta||JSON.parse(readFileSync(new URL("build/hemu-smp.json",ROOT),"latin1"));

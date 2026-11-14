@@ -34,7 +34,7 @@ U64 CodeProbe(U64 fn,I64 mode)
 }
 `}),{ex,gx,Name}=h;
 const functions=[['DCBlotColor8',2],['DCBlotColor4',4],['GrHLine',6],
-  ['GrVLine',6],['GrFillPoly3',3],['GrUpdateLine64',4],['GrUpdateLine64FlushCache',4]];
+  ['GrVLine',6],['GrFillPoly3',3],['GrFillTri0',4],['GrUpdateLine64',4],['GrUpdateLine64FlushCache',4]];
 let cases=0;
 for(const [name,argc] of functions) {
   const at=Number(ex.GuestFun(Name(name)));

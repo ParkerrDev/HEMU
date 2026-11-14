@@ -25,14 +25,36 @@ import "../holyc-wasm/src/abi.js";
 import "../holyc-wasm/src/wasm/emitter.js";
 
 const keyq=KeyQueue();
-let repeatKeys=false,refreshRate=0,actualRate=null;
+let repeatKeys=false,refreshRate=0,actualRate=null,fast_graphics=true,actual_fast=null;
 function SettingsApply(rateChanged=true)
 {
-  instRef.exports.KbdRptSet(BigInt(repeatKeys));
-  const ok=!rateChanged || !!instRef.exports.WinRateSet(BigInt(refreshRate));
-  if (rateChanged) actualRate=ok?refreshRate:null;
+  const ex=instRef.exports;
+  let locked=false,ok=true,msg="";
+  try {
+    if (ex.RenderFastSet && actual_fast!==fast_graphics && machineBarrier) {
+      if (!machineBarrier.Lock())
+        throw new Error("The other CPUs are busy; try changing graphics mode again.");
+      locked=true;
+    }
+    ex.KbdRptSet(BigInt(repeatKeys));
+    if (rateChanged) {
+      ok=!!ex.WinRateSet(BigInt(refreshRate));
+      actualRate=ok?refreshRate:null;
+      if (!ok) msg="This guest has an unknown display timing layout; its rate was not changed.";
+    }
+    if (ex.RenderFastSet)
+      actual_fast=!!ex.RenderFastSet(BigInt(fast_graphics));
+    else {
+      actual_fast=null;ok=false;
+      msg="Restart TempleOS to change graphics mode for this older save.";
+    }
+  } catch (error) {
+    ok=false;msg=error.message;
+  } finally {
+    if (locked && !paused) machineBarrier.Unlock();
+  }
   postMessage({cmd:"settings",ok,rate:actualRate,repeat:repeatKeys,
-    msg:ok?"":"This guest has an unknown display timing layout; its rate was not changed."});
+    fast:actual_fast,msg});
 }
 let curBudget = 1500000, dtMs = 16, dtNs = 16000000;         // guest instr/frame + real wall-clock ms/frame
 let outstanding = 0, snap = null, snapWrote = null, loaded = false, disk = null, gBase = 0, instRef = null;
@@ -223,6 +245,7 @@ onmessage = async (e) => {
     const rateChanged=[0,30,60,120].includes(m.rate);
     if (rateChanged) refreshRate=m.rate;
     if (typeof m.repeat==="boolean") repeatKeys=m.repeat;
+    if (typeof m.fast==="boolean") fast_graphics=m.fast;
     if (loaded) SettingsApply(rateChanged);
   }
   else if (m.cmd === "osWrite") osWrite(m).catch(err => fileResult(m.id, { ok: false, msg: String(err?.message || err), state: "error" }));
@@ -286,6 +309,7 @@ async function exportImage(kind) {
       sp:Number(instRef.exports.__sp.value),ipiAddr:smpCfg?.ipiAddr||0,
       requiredBusProtocol:machineBus?.Ready()?BUS_VERSION:undefined,
       paused,rate:refreshRate,actualRate,repeat:repeatKeys,budget:curBudget,
+      ...(actual_fast===null?{}:{fast:actual_fast}),
       keyboard:keyq.Save(),pointer:guestInput.save(),launch,guestPatches:guestPatches};
     if(machineBus){machineBus.Freeze();frozen=true;}
     const buf=kind==="snapshot"?await SnapshotSave({meta,wasm:engineBytes,memory:instRef.exports.memory,disk}):await DiskImage();
@@ -322,9 +346,10 @@ async function SnapInflate(gz,capture)
   postMessage({cmd:"ramReady",ms:Math.round(performance.now()-start)});
   return bytes;
 }
-async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, repeat, rate, resumeDisk=false, diskDelay=2500 }) {
+async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, repeat, rate, fast, resumeDisk=false, diskDelay=2500 }) {
   if ([0,30,60,120].includes(rate)) refreshRate=rate;
   if (typeof repeat==="boolean") repeatKeys=repeat;
+  if (typeof fast==="boolean") fast_graphics=fast;
   smpCfg = smp || null;
   if (fixedB) curBudget = fixedB;
   postMessage({cmd:"progress",text:"reading saved machine…",pct:60});
@@ -431,6 +456,10 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
     paused=m.paused;refreshRate=m.rate;actualRate=m.actualRate;repeatKeys=m.repeat;
     curBudget=m.budget;keyq.Restore(m.keyboard);guestInput.restore(m.pointer);
     loaded=true;inst.exports.SnapshotResume();
+    actual_fast=inst.exports.RenderFastSet?!!inst.exports.RenderFastSet(-1n):null;
+    if (m.fast!==undefined && m.fast!==actual_fast)
+      throw new Error("Saved graphics setting does not match its engine state");
+    if (actual_fast!==null) fast_graphics=actual_fast;
     gx=createGuestExec({inst,gBase,onEvent:gxEvent,access:RamAccess});gxProbe=gx.probe();
     if(restoredDisk)GuestCacheInvalidate();
     if (!gxProbe.ok) throw new Error("Saved guest API could not be restored: "+gxProbe.errors.join("; "));
@@ -438,7 +467,9 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
     GuestPatchCheck(gx,guestPatches);
     gx.restoreLaunch(m.launch);
     postMessage({cmd:"guestReady",ok:true,probe:gxProbe,restored:true,diskReady:!!disk,diskPending:false});
-    postMessage({cmd:"settings",ok:true,rate:actualRate,repeat:repeatKeys});
+    postMessage({cmd:"settings",ok:actual_fast!==null,rate:actualRate,
+      repeat:repeatKeys,fast:actual_fast,msg:actual_fast===null?
+        "Restart TempleOS to change graphics mode for this older save.":""});
     postMessage({cmd:"paused",value:paused});
     if (smpCfg) {
       const c=new Int32Array(smpCfg.ctrl);
@@ -449,7 +480,11 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
       postMessage({cmd:"smpReady",ncore:smpCfg.ncore});
     }
 
-  } else inst.exports.__rt_init();
+  } else {
+    inst.exports.__rt_init();
+    if (inst.exports.RenderFastSet)
+      actual_fast=!!inst.exports.RenderFastSet(BigInt(fast_graphics));
+  }
   if (saved) postMessage({cmd:"restored",cores:saved.meta.cores,paused});
   postMessage({cmd:"progress",text:"starting TempleOS…",pct:100});
 

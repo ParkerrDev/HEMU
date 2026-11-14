@@ -24,6 +24,8 @@ function Pack(m=meta,engine=wasm) {
 assert.equal(await SnapshotInspect(gzipSync(Buffer.alloc(32))),null,"legacy RAM uses its original loader");
 const head=await SnapshotInspect(Pack());
 assert.equal((await SnapshotInspect(Pack({...meta,heapAbi:1}))).meta.heapAbi,1);
+for (const fast of [false,true])
+  assert.equal((await SnapshotInspect(Pack({...meta,fast}))).meta.fast,fast);
 assert.deepEqual(head.meta,{...meta,heapAbi:0,guestPatches:[]});
 assert.deepEqual((await SnapshotInspect(Pack({...meta,guestPatches:["doc-sprite-clip-v1","ac-dbl-buf-v1"]}))).meta.guestPatches,
   ["doc-sprite-clip-v1","ac-dbl-buf-v1"],"both TempleOS corrections are known");assert.deepEqual(Buffer.from(head.wasm),wasm);
@@ -31,7 +33,7 @@ for (const change of [{guestPatches:["unknown"]},{guestPatches:["doc-sprite-clip
   {wasmBytes:3e6},{diskBytes:-1},{heapPtr:2**40},{base:436666368},{sp:-1},
   {engineHash:"f".repeat(64)},{launch:{name:"bad",slot:80,task:10}},
   {keyboard:{...meta.keyboard,queue:[256]}},{pointer:{...meta.pointer,x:null}},
-  {rate:47},{actualRate:47},{paused:1},{budget:0}])
+  {rate:47},{actualRate:47},{paused:1},{budget:0},{fast:0},{fast:null},{fast:"true"}])
   await assert.rejects(()=>SnapshotInspect(Pack({...meta,...change})),/Invalid HEMU snapshot/);
 await assert.rejects(()=>SnapshotInspect(Pack(meta,wasm.subarray(0,200))),/truncated/);
 const open=await SnapshotOpen(Pack());

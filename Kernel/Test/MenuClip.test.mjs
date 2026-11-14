@@ -51,4 +51,4 @@ for(const pose of fixture.poses) {
   assert.ok(fullPasses.size>0 && fullPasses.size<24,"incremental frames reuse bounds without walking the full document");
 }
 await h.Exec("Kill(menu_clip_task);");
-console.log(`Ctrl+M: ${frames} completed frames equal corrected native QEMU/KVM pixels for ${tag}, clipped at six native scrollbar positions along both window edges; original guest rendering.`);
+console.log(`Ctrl+M: ${frames} completed frames equal corrected native QEMU/KVM pixels for ${tag}, clipped at six native scrollbar positions along both window edges; default fast graphics.`);

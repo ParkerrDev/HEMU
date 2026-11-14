@@ -1,5 +1,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import {fileURLToPath} from "node:url";
+import {execFileSync} from "node:child_process";
 import { compileHemu } from "./Compile.js";
 import {STOCK_SECTION} from "./Stock.js";
 function StockRequired(bytes) {
@@ -8,6 +10,8 @@ function StockRequired(bytes) {
 }
 
 const out = resolve(process.argv[2] || "build");
+execFileSync(process.execPath,[fileURLToPath(new URL(
+  "../holyc-wasm/Misc/RuntimeMk.mjs",import.meta.url)),"--check"],{stdio:"inherit"});
 mkdirSync(out, { recursive: true });
 
 const r = compileHemu();

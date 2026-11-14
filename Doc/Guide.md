@@ -139,9 +139,10 @@ desktop, disk or JIT implementation.
 Original QEMU/KVM supplies 200 raster reference cases for the original guest's
 line/triangle instructions: pixels, depth, collision counts, extents, nearest
 distance and final random seeds agree. Another 30 cases cover pixel/depth storage
-overlapping the task seed, dither probability and each other. A guest-code test
-changes all seven formerly replaced drawing entries, checks interpreted and
-translated results, then changes their bytes again and rejects stale compiled
+overlapping the task seed, dither probability and each other. Another 640 native
+triangle/fan cases compare both graphics modes, including custom transforms and
+mirroring. A guest-code test changes drawing entry points, including GrFillTri0
+and GrFillPoly3, checks interpreted and translated results, then changes their bytes again and rejects stale compiled
 code before any instruction executes. These are bounded checks, not complete
 x86 or graphics coverage. Divide faults enter the guest's #DE handler for valid ring-zero,
 long-mode, IST-zero interrupt/trap gates targeting the current code segment.
@@ -196,23 +197,34 @@ coordinates. ATA transfers support both 16-bit and 32-bit I/O, including REP INS
 writes preserve the 16-color palette and notify the host when colors change. A host must implement both
 `__host_disk` and `__host_disk_wr`.
 
-In current builds, the interpreter and block JIT execute guest x86 instructions, including all
-TempleOS drawing routines. There is no named-function replacement layer and no
-alternative accelerated renderer. The JIT validates compiled code bytes before
-execution so edited or recycled guest code does not reuse a stale translation.
+The interpreter and block JIT execute guest x86 instructions. Fast graphics is
+on by default: `Kernel/Render.HC` accelerates four stock compositor/video routines
+and triangle filling plus horizontal/vertical depth spans. Polygon assembly,
+transforms and callbacks remain guest code.
+`RenderFastSet(0)` selects original drawing instructions; `RenderFastSet(1)`
+enables acceleration and `RenderFastSet(-1)` queries it. The browser setting uses
+the existing SMP barrier so all CPUs switch together without invalidating compiled
+blocks. Generic XLAT and immediate ROL/ROR translation benefits both modes.
 
-Full machine saves embed their engine. Importing an older save restores that
-older engine and its execution behavior, including any drawing replacements it
-contained. Restart uses the current engine and retains saved C: files; it does
-not retain the old running RAM state. Stock RAM captures use the current engine.
+The initial validated stock load records complete eligible function/helper bytes.
+Each accelerated call compares them before replacing execution; edited code and
+unsupported contexts execute normally. These baselines and the selected mode
+survive a full machine save. Fast graphics changes instruction counts and timing;
+original mode removes these drawing replacements but is not cycle-accurate.
+The JIT separately validates compiled code bytes to reject stale translations.
+
+Full machine saves embed their engine and graphics mode. Older embedded engines
+without `RenderFastSet` cannot switch modes; the host reports that limitation.
+Restart uses the current engine and retains saved C: files, while reloading the
+stock desktop instead of preserving old running RAM.
 
 The host still understands some TempleOS internals: it observes completed
 screen-update returns and decodes the guest's planar screen image, writes mouse
 state into guest globals, and injects requested commands as guest function calls.
 Explicit refresh settings patch guest pacing code. Stock images resume a prepared
 desktop with documented native corrections. These integrations remain separate
-from instruction execution; removing drawing replacements does not make HEMU a
-hardware-complete or cycle-accurate PC. The SMP build (`SMP_SNAP`) runs one core per
+from the graphics mode; neither mode makes HEMU a hardware-complete or
+cycle-accurate PC. The SMP build (`SMP_SNAP`) runs one core per
 host thread over shared memory with worker/barrier regressions. Browser networking
 for TOOM multiplayer is not implemented.
 

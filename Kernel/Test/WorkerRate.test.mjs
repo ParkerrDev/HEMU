@@ -4,6 +4,8 @@ import {HemuBoot,ReadyWait,Measure,FramesWait} from "./WorkerHost.mjs";
 const h=await HemuBoot({rate:30});
 try {
   assert.equal((await ReadyWait(h,20000)).ok,true);
+  assert.equal(h.msgs.filter(m=>m.cmd==="settings").at(-1).fast,true,
+    "fresh boots use fast graphics by default");
   for (const rate of [60,120,0,30]) {
     h.Post({cmd:"set",rate,repeat:rate!=30});
     const applied=await h.Wait(m=>m.cmd=="settings" && m.rate==rate,5000);

@@ -87,6 +87,13 @@ assert.equal(jit.jitInspect(start).cached,false,"self-modification invalidates t
 Start(Loop(body),20);jit.jitReset();jit.jitCompile(start);
 u8[a[0]+start+6]^=1;const before=State();
 assert.equal(jit.jitRun(start),0);assert.deepEqual(State(),before);count++;
+// Every byte in each 8/4/2/1-byte guard fragment remains protected.
+for(let length=1;length<=15;length++)for(let byte=0;byte<length;byte++) {
+  Start(Array(length).fill(0x90));jit.jitReset();
+  assert.equal(jit.jitCompile(start),length);
+  u8[a[0]+start+byte]^=1;const saved=State();
+  assert.equal(jit.jitRun(start),0);assert.deepEqual(State(),saved);count++;
+}
 // Faults and IRQ windows must still expose the exact executed prefix, even
 // when the forward header and its fall-through body share a compiled block.
 for(const unsafe of [[0x48,0xF7,0xF3],[0xD9,0xE8],[0xFB],[0xF0,0x48,0xFF,0x03]]) {

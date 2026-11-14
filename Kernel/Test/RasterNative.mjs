@@ -18,15 +18,22 @@ if(process.argv.includes("--record")) {
 }
 const expected=JSON.parse(readFileSync(file,"utf8"));
 assert.equal(hash,expected.sourceHash,"regenerate original V5.03 evidence after changing the probe");
-const h=await GuestHarness(),{ex,gx,base,Name}=h;
-await h.Exec(source.toString("latin1"));
-const ptr=Number(ex.GuestVar(Name("raster_res"))),
-  cnt=gx.rd64(Number(ex.GuestVar(Name("raster_cnt")))),dv=new DataView(ex.memory.buffer),rows=[];
-assert.equal(cnt,200);
-for(let i=0;i<cnt;i++) {
-  const values=[];
-  for(let j=0;j<11;j++)values.push(dv.getBigUint64(base+ptr+(i*11+j)*8,true).toString(16).toUpperCase().padStart(16,"0"));
-  rows.push(values.join(" ")+" ");
+const h=await GuestHarness({exports:["RasterFastCount"],extraSource:
+  "I64 RasterFastCount(){return render_calls[4]+render_calls[5];}"}),{ex,gx,base,Name}=h;
+for(const fast of [false,true]) {
+  ex.RenderFastSet(BigInt(fast));
+  const before=ex.RasterFastCount();
+  await h.Exec(fast?"RasterNative;":source.toString("latin1"));
+  if(fast)assert.ok(ex.RasterFastCount()>before,"native fixtures exercise accelerated spans");
+  else assert.equal(ex.RasterFastCount(),before,"original mode executes every span");
+  const ptr=Number(ex.GuestVar(Name("raster_res"))),
+    cnt=gx.rd64(Number(ex.GuestVar(Name("raster_cnt")))),dv=new DataView(ex.memory.buffer),rows=[];
+  assert.equal(cnt,200);
+  for(let i=0;i<cnt;i++) {
+    const values=[];
+    for(let j=0;j<11;j++)values.push(dv.getBigUint64(base+ptr+(i*11+j)*8,true).toString(16).toUpperCase().padStart(16,"0"));
+    rows.push(values.join(" ")+" ");
+  }
+  assert.equal(rows.join("\n")+"\n",expected.out,"original QEMU/KVM raster parity; fast="+fast);
 }
-assert.equal(rows.join("\n")+"\n",expected.out,"original QEMU/KVM raster parity");
-console.log(`Raster: 200 original QEMU/KVM cases match emulated guest pixels, depth, counts, extents, nearest distance and random seed.`);
+console.log(`Raster: 200 original QEMU/KVM cases match both graphics modes: pixels, depth, counts, extents, nearest distance and random seed.`);

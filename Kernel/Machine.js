@@ -48,7 +48,17 @@ export function Machine({message,error,earlyWorker=null})
     requests.Reset(msg);requests.Fail(msg);
   }
   function Post(m,transfer=[]) {
-    if(!group?.initialized)return;
+    if(group?.restart&&m.cmd==="set") {
+      const {cmd,...settings}=m;
+      Object.assign(group.restart,settings);
+    }
+    if(!group?.initialized) {
+      if(group&&m.cmd==="set") {
+        const {cmd,...settings}=m;
+        group.settings={...group.settings,...settings};
+      }
+      return;
+    }
     if((group.hostLost||group.busFailed)&&["exportSnapshot","exportDisk"].includes(m.cmd)) {
       message({cmd:"exportResult",kind:m.cmd==="exportSnapshot"?"snapshot":"disk",ok:false,
         msg:group.hostLost?"The main worker was lost. This machine cannot be exported; restart TempleOS.":
@@ -117,7 +127,8 @@ export function Machine({message,error,earlyWorker=null})
       g.bsp.onmessage=e=>Receive(e.data);
       g.bsp.onerror=e=>HostLost(e.message||"Main worker failed");
       g.bsp.onmessageerror=()=>HostLost("The main worker sent an unreadable message");
-      const init={cmd:"init",gz,wasmUrl,...options,wasmBytes:saved?undefined:wasmBytes,manifest,resumeDisk};
+      const init={cmd:"init",gz,wasmUrl,...options,...g.settings,
+        wasmBytes:saved?undefined:wasmBytes,manifest,resumeDisk};
       if(cores===4) {
         const mem=new WebAssembly.Memory({initial:512,maximum:8192,shared:true});
         g.ctrl=new SharedArrayBuffer(64);
@@ -141,15 +152,20 @@ export function Machine({message,error,earlyWorker=null})
     } catch(e) {Failed(String(e.message||e));return false;}
   }
   async function Restart(boot) {
-    const current=generation;
+    const current=generation,previous=group,next={...boot};
     requests.Fail("OS restarted during the request.");
-    if(group?.initialized&&!group.hostLost) {
-      const result=await requests.Request({cmd:"flushDisk"});
-      if(current!==generation)return false;
-      if(!result.ok&&!group.hostLost){requests.Fail(result.msg);throw Error(result.msg);}
+    if(previous)previous.restart=next;
+    try {
+      if(group?.initialized&&!group.hostLost) {
+        const result=await requests.Request({cmd:"flushDisk"});
+        if(current!==generation)return false;
+        if(!result.ok&&!group.hostLost){requests.Fail(result.msg);throw Error(result.msg);}
+      }
+    } finally {
+      if(previous)delete previous.restart;
     }
     SpareTake(null);requests.Reset();
-    return Start(boot,true);
+    return Start(next,true);
   }
   return {Warm,Start,Restart,Stop,post:Post,Request:requests.Request,
     get kind(){return group?(group.cores===4?"smp":"worker"):null;},

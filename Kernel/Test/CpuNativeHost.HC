@@ -96,7 +96,7 @@ U0 __jit_seg(U64 *,U64 *,U64 *,U64 *,U64 *,U64 *)
 {
 }
 
-U0 __jit_chain(U64 *,I64 *)
+U0 __jit_chain(U64 *,I64 *,Bool *,U8 *)
 {
 }
 

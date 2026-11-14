@@ -16,6 +16,10 @@ try {
   h=await HemuBoot({snapshot:await LegacySnapshot(),busProtocol});
   assert.equal((await ReadyWait(h,20000)).ok,true);
   if(!h.msgs.some(m=>m.cmd==="restored"))await h.Wait(m=>m.cmd==="restored",30000);
+  const graphics=await Request(h,{cmd:"set",fast:false},m=>m.cmd==="settings");
+  assert.equal(graphics.ok,false);assert.equal(graphics.fast,null);
+  assert.match(graphics.msg,/Restart TempleOS/,
+    "an embedded engine without mode control must not claim it changed mode");
   await Request(h,{cmd:"pause",value:false},m=>m.cmd==="paused"&&!m.value);
   await FramesWait(h,40,15000);
   await Request(h,{cmd:"pause",value:true},m=>m.cmd==="paused"&&m.value);

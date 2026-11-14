@@ -43,7 +43,7 @@ import U0 __host_snd(F64 hz,U64 ns); //Speaker frequency (0 off) and observed TS
 import I64 __jit_state(U64 *regs, U64 *flags, U64 *pc); // hand over the CPU-state addresses; return 1 to enable the JIT
 import U0  __jit_x87(F64 *x87regs, I64 *x87top, U64 *x87sw);    // x87 register stack, top, status word (float blocks)
 import U0  __jit_seg(U64 *fsb, U64 *gsb, U64 *tscp, U64 *x87cw, U64 *xlo, U64 *xhi);  // segment bases, TSC, control word, XMM halves (FXSAVE/FXRSTOR)
-import U0  __jit_chain(U64 *blocks, I64 *counts);     // per-slot compiled-block tables, so the host can chain blocks natively
+import U0 __jit_chain(U64 *blocks,I64 *counts,Bool *fast,U8 *gate);
 import I64 __jit_compile(U64 at);                    // compile the block at rip: its instruction count, or 0 if it cannot
 import I64 __jit_run(U64 at);                        // run the compiled block at rip: instructions executed (bit 30: IF window)
 import I64 __jit_dispatch(I64 budget);                // run a chain of compiled blocks up to budget: instructions executed

@@ -84,10 +84,10 @@ U0 HemuInit()
     hpet_ctr=GuestU64(GuestVarMember("cnts","CCntsGlbls","HPET_initial"))+
 	  resume_ticks;
     CaptureInit;
+    RenderInit;
   } else
     "HEMU: this guest lacks a name HEMU needs; emulating only.\n";
   g_jit_on=CoreAttach;
-  __jit_chain(g_jit_rip,g_jit_n);
   g_inited=1;
 }
 
@@ -98,7 +98,6 @@ U0 SnapshotResume()
   MemSet(g_jit_n,0,sizeof(g_jit_n));
   MemSet(g_jit_hot,0,sizeof(g_jit_hot));
   g_jit_on=CoreAttach;
-  __jit_chain(g_jit_rip,g_jit_n);
   for (i=0;i<16;i++)
     VgaPaletteSend(i);
   UpdateSpk;

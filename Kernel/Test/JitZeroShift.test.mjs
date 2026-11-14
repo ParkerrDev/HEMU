@@ -54,7 +54,7 @@ for(const sharedMemory of [false,true]) {
   }
   // A zero-count read/modify/write still reaches device memory.
   Compare([0x48,0xC1,0x3B,0],0,0xFEE00310n,3);
-  for(const width of [1,2,4,8])for(const op of [4,5,7])for(const count of [0,width===8?64:32,128,192])
+  for(const width of [1,2,4,8])for(const op of [0,1,4,5,7])for(const count of [0,width===8?64:32,128,192])
     for(const immediate of [true])for(const operand of [3,4,5,9,-1])
       for(const address of [BigInt(DATA),BigInt(SIZE-1),BigInt(SIZE),0x10000001800n,-0x1FFFFCF0n]) {
         const rex=(width===8?8:0)|(operand===9?1:0),code=[...(width===2?[0x66]:[]),...(rex?[0x40|rex]:[]),
@@ -68,15 +68,15 @@ for(const sharedMemory of [false,true]) {
         if(immediate)code.push(count);
         Compare(code,count,operand===-1?BigInt.asIntN(32,address):address,operand);
       }
-  for(const width of [1,2,4,8])for(const op of [4,5,7])
+  for(const width of [1,2,4,8])for(const op of [0,1,4,5,7])
     for(const count of [0,width===8?64:32,128,192])for(const operand of [0,1,4,5,9])for(const rexPresent of [false,true]) {
       const rex=(width===8?8:0)|(operand===9?1:0),code=[...(width===2?[0x66]:[]),...(rex||rexPresent?[0x40|rex]:[]),
         width===1?0xC0:0xC1,0xC0|op<<3|(operand&7),count];
       Compare(code,count,null,operand);
       Compare([0x49,0x83,0xC0,1,...code,0x0F,0x90,0xC3],count,null,operand,{instructions:3});
     }
-  for(const segment of [1,2])for(const op of [4,5,7])for(const count of [0,64,128]) {
+  for(const segment of [1,2])for(const op of [0,1,4,5,7])for(const count of [0,64,128]) {
     Compare([segment===1?0x64:0x65,0x48,0xC1,op<<3|3,count],count,0xFEE00310n,3,{segment});
   }
 }
-console.log(`${checks} zero-count compiled shifts preserve registers, flags, segments and RAM/MMIO read-modify-write effects.`);
+console.log(`${checks} zero-count compiled shifts/rotates preserve registers, flags, segments and RAM/MMIO read-modify-write effects.`);

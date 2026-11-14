@@ -17,9 +17,10 @@ for (const smp of [0,4]) {
   const ranges=[[addr("g_cpu_st"),addr("g_ncore")-addr("g_cpu_st")],
     [addr("g_xmm_lo"),1024],[addr("tsc"),16],[addr("kbd_q"),512],[addr("vga_dac"),768],
     [addr("spk_ctrl"),8]];
-  let h=await HemuBoot({smp,busProtocol,rate:120,repeat:true,keep_buf:true}),saved;
+  let h=await HemuBoot({smp,busProtocol,rate:120,repeat:true,fast:false,keep_buf:true}),saved;
   try {
     assert.equal((await ReadyWait(h,20000)).ok,true);
+    assert.equal(h.msgs.filter(m=>m.cmd==="settings").at(-1).fast,false);
     if (!h.msgs.some(m=>m.cmd==="diskInfo"&&m.ok)) await h.Wait(m=>m.cmd==="diskInfo"&&m.ok,30000);
     if (smp && !h.msgs.some(m=>m.cmd==="smpReady")) await h.Wait(m=>m.cmd==="smpReady",10000);
     const write=await Result(h,{cmd:"osWrite",id:"write",path:"C:/Home/SnapshotCheck.TXT",bytes:new TextEncoder().encode("complete machine disk\n")});
@@ -30,6 +31,12 @@ for (const smp of [0,4]) {
     assert.equal(gate.ok,true,gate.msg);
     await Request(h,{cmd:"pause",value:true},m=>m.cmd==="paused"&&m.value);
     const before=await Request(h,{cmd:"__peek",ranges},m=>m.cmd==="__peek");
+    for (const fast of [true,false]) {
+      const changed=await Request(h,{cmd:"set",fast},m=>m.cmd==="settings");
+      assert.equal(changed.ok,true,changed.msg);assert.equal(changed.fast,fast);
+      const frozen=await Request(h,{cmd:"__peek",ranges},m=>m.cmd==="__peek");
+      assert.deepEqual(frozen.ranges,before.ranges,"changing mode while paused cannot run a CPU");
+    }
     assert.deepEqual([...before.ranges.at(-1)],[2,0,0,0,0,0,0,0],"one enabled gate remains distinct from both off");
     const frame=h.last.hash,palette=h.palette.slice();
     assert.ok(palette.every(v=>v!==null),"boot publishes every displayed palette entry");
@@ -51,8 +58,11 @@ for (const smp of [0,4]) {
     assert.equal(head.meta.requiredBusProtocol,smp?busProtocol:undefined);
     assert.equal(head.meta.version,smp&&busProtocol?2:1);
     assert.equal(head.meta.repeat,true);assert.equal(head.meta.launch.name,"Snapshot loop");
-    h=await HemuBoot({snapshot:saved.buf,busProtocol,keep_buf:true});
+    assert.equal(head.meta.fast,false);
+    h=await HemuBoot({snapshot:saved.buf,busProtocol,fast:true,keep_buf:true});
     await h.Wait(m=>m.cmd==="restored",30000);
+    assert.equal(h.msgs.filter(m=>m.cmd==="settings").at(-1).fast,false,
+      "a full save retains its actual graphics mode");
     assert.ok(h.msgs.some(m=>m.cmd==="guestReady"&&m.restored&&m.diskReady&&!m.diskPending));
     const resumed=await Request(h,{cmd:"__peek",ranges},m=>m.cmd==="__peek");
     assert.deepEqual(resumed.ranges,before.ranges,"CPU, x87, SSE, clock, keyboard and palette restore exactly");
@@ -65,8 +75,9 @@ for (const smp of [0,4]) {
     assert.equal(busy.ok,false);assert.match(busy.msg,/busy/);
     const read=await Result(h,{cmd:"osExec",id:"read",target:"adam",src:'I64 n;U8 *p=FileRead("C:/Home/SnapshotCheck.TXT",&n);if (!p || n!=22 || StrCmp(p,"complete machine disk\\n")) throw(\'Snapshot\');Free(p);'});
     assert.equal(read.ok,true,read.msg);
-    const settings=await Request(h,{cmd:"set",rate:30,repeat:false},m=>m.cmd==="settings");
+    const settings=await Request(h,{cmd:"set",rate:30,repeat:false,fast:true},m=>m.cmd==="settings");
     assert.equal(settings.ok,true);assert.equal(settings.rate,30);assert.equal(settings.repeat,false);
+    assert.equal(settings.fast,true,"mode switches while the restored machine is running");
     assert.ok(!h.msgs.some(m=>m.cmd==="error"));
     console.log(`${smp||1}-core full snapshot: ${saved.buf.byteLength} compressed bytes; registers/devices/frame/game/disk/settings survive`);
   } finally {await h?.Stop();}

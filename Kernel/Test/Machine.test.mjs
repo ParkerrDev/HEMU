@@ -26,14 +26,26 @@ try {
   assert.ok(workers.every(w=>w.stopped));
   assert.equal(workers.flatMap(w=>w.sent).length,0,"Canceled asset fetch cannot initialize a worker.");
 
-  await machine.Start(boot);
+  held=new Promise(resolve=>release=resolve);
+  const starting=machine.Start({...boot,fast:true,rate:30});
+  machine.post({cmd:"set",fast:false,rate:60});
+  machine.post({cmd:"set",repeat:true});
+  held=null;release();
+  await starting;
   let bsp=workers.at(-1);
+  assert.equal(bsp.sent[0].fast,false,"Settings changed while fetching apply before the first frame.");
+  assert.equal(bsp.sent[0].rate,60);
+  assert.equal(bsp.sent[0].repeat,true);
   assert.equal(bsp.sent[0].resumeDisk,false);
   const restarting=machine.Restart(boot);
   assert.equal(bsp.sent.at(-1).cmd,"flushDisk","Restart flushes even before guest/disk readiness.");
-  bsp.Receive({cmd:"fileResult",id:bsp.sent.at(-1).id,ok:true});
+  const flushId=bsp.sent.at(-1).id;
+  machine.post({cmd:"set",fast:false,rate:120});
+  bsp.Receive({cmd:"fileResult",id:flushId,ok:true});
   assert.equal(await restarting,true);assert.equal(bsp.stopped,true);
   bsp=workers.at(-1);assert.equal(bsp.sent[0].resumeDisk,true);
+  assert.equal(bsp.sent[0].fast,false,"Changes during the disk flush reach the replacement machine.");
+  assert.equal(bsp.sent[0].rate,120);
 
   bsp.Receive({cmd:"frame",buf:new ArrayBuffer(0)});
   bsp.Receive({cmd:"error",msg:"CPU 0 stopped",retained:true});

@@ -61,9 +61,11 @@ this correction changes newly built engines without changing saved state.
   and decode FPS only when the actual top-line glyphs are readable.
 - Barrier checks reject stale acknowledgements and hold application-core writes
   for the duration of each capture.
-- Raster checks execute the guest's original compiled V5.03 functions and
-  compare pixels, depth, counts and RNG state with independent QEMU/KVM fixtures.
-- Guest-code checks edit all seven formerly replaced drawing entries and execute
+- Raster checks explicitly run both graphics modes and compare pixels, depth, counts and RNG state with independent QEMU/KVM fixtures.
+- Render checks compare fast and original compositor pixels, registers and flags,
+  reject modified function/helper bodies and unsupported contexts, and switch modes
+  with already compiled blocks. Polygon assembly and transforms stay in guest code.
+- Guest-code checks edit drawing entry points, including the triangle routine, and execute
   their bytes with the interpreter and JIT, including rejecting a stale translation.
 - Worker checks run the production worker and AP workers with one and four
   cores. They independently read every sampled top row, compare its displayed
@@ -307,19 +309,24 @@ The bounded entry behavior follows Intel's [System Programming Guide,
 sections 6.12 to 6.15](https://cdrdv2-public.intel.com/812386/253668-sdm-vol-3a.pdf).
 
 `RasterNative.mjs` compares 200 source-hashed original QEMU/KVM cases with the
-original guest instructions in HEMU: horizontal/vertical lines and triangles,
+original and fast graphics modes in HEMU: horizontal/vertical lines and triangles,
 clipping, reversed endpoints, raster modes, ordered/probability dithering,
 recorded extents, nearest distance and draw-disabled contexts. Pixel/depth
 storage, changed/collision counts and final RNG state must agree. Regenerate
 with `HOLYC_QEMU_ORACLE=... node Kernel/Test/RasterNative.mjs --record`.
 
+`TriangleNative.mjs` compares 640 original QEMU/KVM cases in both modes: vertex
+orders, degenerate/clipped triangles, depth, RNG, drawing metadata, polygon fans,
+custom transforms and mirrors. It also checks unchanged input vertices and that
+fast mode reaches the triangle accelerator while original mode does not.
+
 `RasterAlias.mjs` adds 30 original QEMU/KVM cases in which pixel or depth storage
 overlaps the task seed, dither probability or each other. The reference fixtures
-are independent of HEMU. Removed replacement algorithms and their frozen
-implementation fixtures are not retained as a second rendering path.
+are independent of HEMU. Fast graphics refuses these aliased contexts before changing guest state,
+so their original instruction ordering remains authoritative.
 
-`GuestCode.test.mjs` writes distinctive x86 instructions at the seven drawing
-entries that previously dispatched replacements. Both interpreter and JIT must
+`GuestCode.test.mjs` writes distinctive x86 instructions at drawing entry points, including
+GrFillTri0 and its GrFillPoly3 caller. Both interpreter and JIT must
 execute them. After another code edit, the old translation must execute zero
 instructions and the newly compiled body must return the changed result. Original
 bytes are restored before ordinary guest execution resumes.
@@ -491,6 +498,11 @@ save with the bundled 256 MiB disk compresses to about 53.5 MB. It is not a
 small-memory guarantee for every phone. The tests compare CPU/device bytes
 and the saved frame across fresh one- and four-core workers, verify disk
 readback, game exclusivity and saved 120 Hz settings returning to stock 30 Hz.
+The optional boolean `fast` records the actual graphics mode and is checked
+against restored engine memory. Missing metadata remains valid for older saves;
+engines without `RenderFastSet` report that mode changes require Restart.
+Tests switch modes both while running and paused, then restore original mode
+even when the new browser boot request prefers fast graphics.
 
 Allocator ABI is recorded separately from the container version. Missing ABI
 metadata denotes the original bump allocator (0). Current allocator sessions
@@ -593,7 +605,7 @@ and the original native source provenance.
 
 `MenuClip.test.mjs` checks 144 completed frames against independent QEMU/KVM
 pixels: the stock Ctrl+M Titanium sprite at six native scrollbar positions,
-executing the original guest drawing routines. `MenuClipOracle.mjs`
+using the default fast graphics mode. `MenuClipOracle.mjs`
 records 48 unmodified V5.03 frames, which alternate between blank and visible
 tails, then verifies 24 corrected native refreshes at each position. The
 prepared-capture test checks that incremental frames reuse cached bounds

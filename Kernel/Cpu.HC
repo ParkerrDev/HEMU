@@ -342,6 +342,7 @@ U0 CaptureFrom(U64 bd)
 }
 
 #include "Video"
+#include "Render"
 
 U0 CaptureDesk()
 {//Capture after GrUpdateVGAGraphics has committed the OS screen image.
@@ -352,6 +353,8 @@ U0 Step()
 {
   U64 op, a, b, r, fault_rip=rip; I64 sz, d, opn, r2, imm;
 
+  if (render_fast && render_gate[rip&0xFFFF] && RenderTry)
+    return;
   if (g_capture_gate[rip&0xFFFF]) {
     if (rip==g_capture_text)
       CaptureFrom(GuestU64(GuestU64(guest.gr_dc2)+of_dc.body));
@@ -464,7 +467,7 @@ U0 Step()
     case 0xD2: DecodeModRM(); d = RdReg(1, 1);     DoShift(rg & 7, d, 1);  break;  // grp2 r/m8, CL
     case 0xD3: DecodeModRM(); d = RdReg(1, 1);     DoShift(rg & 7, d, sz); break;  // grp2 r/m, CL
     case 0xD7: reg[0] = (reg[0] & 0xFFFFFFFFFFFFFF00) |                             // XLAT: AL = DS:[RBX+AL]
-               RdMem(reg[3] + (reg[0] & 0xFF) + g_segbase, 1); break;
+               RdMem(reg[3] + (reg[0] & 0xFF) + g_segbase, 1)&0xFF; break;
 
     // grp3: only TEST (reg field 0/1) has a trailing immediate, so RIP-relative EA must skip it.
     // Peek the ModRM reg field before decoding to pass the right immlen (else EA lands short).
@@ -591,6 +594,10 @@ Bool CoreAttach()
   Bool res=__jit_state(&reg[0],&rfl,&rip);
   __jit_x87(&fpr[0],&fsp,&x87_sw);
   __jit_seg(&msr_fsbase,&msr_gsbase,&tsc,&x87_cw,&xmm_lo[0],&xmm_hi[0]);
+  if (MyCore)
+    __jit_chain(NULL,NULL,&render_fast,render_gate);
+  else
+    __jit_chain(g_jit_rip,g_jit_n,&render_fast,render_gate);
   return res;
 }
 

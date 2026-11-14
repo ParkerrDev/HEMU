@@ -22,13 +22,14 @@ export function jitImports(getExports) {
     __jit_run:pc=>BigInt(jitRun(Number(pc))),
     __jit_dispatch:budget=>BigInt(jitDispatch(Number(budget))),
     __jit_x87:jitX87,
-    __jit_chain:jitChain,
+    __jit_chain:(blocks,counts,fast=0,gate=0)=>jitChain(blocks,counts,fast,gate,getExports().RenderTry),
     __jit_seg:jitSeg
   };
 }
 export function jitState(reg,rfl,rip,gbase,memObj,rdMem,wrMem) {
   // Compiled modules import an owner's memory and callbacks permanently.
   jitReset();JITRIP=JITN=0;RUNTBL=RUNDISP=null;
+  RENDERFAST=RENDERGATE=0;RENDERTRY=null;
   jitX87(0,0,0);jitSeg(0,0,0,0,0,0);
   REG=Number(reg);RFL=Number(rfl);RIP=Number(rip);GBASE=Number(gbase);
   MEM=memObj;U8=new Uint8Array(memObj.buffer);RDMEM=rdMem;WRMEM=wrMem;
@@ -179,12 +180,14 @@ function fIntValue(f,bits,trunc)
 // wasm (zero JS per block) until an un-JIT'd rip. The block fns live in its funcref table (table.set on
 // compile); it reads rip + hemu's g_jit_rip[]/g_jit_n[] (offsets from jitChain) to verify each block. ----
 let JITRIP = 0, JITN = 0, RUNTBL = null, RUNDISP = null;
+let RENDERFAST=0,RENDERGATE=0,RENDERTRY=null;
 const runBudget=new WebAssembly.Global({value:"i64",mutable:true},0x7FFFFFFFn);
 function buildRuntime() {
   if (!RIP || !JITRIP || !MEM) return; const rm = new Module();
   const left=rm.importGlobal("env","budget",VT.i64,true);
   if (MEM && typeof SharedArrayBuffer !== "undefined" && MEM.buffer instanceof SharedArrayBuffer) rm.importMemory("env", "mem", 1, 8192, true);   // shared guest RAM (SMP): import must declare shared (+max). typeof-guard: without cross-origin isolation the global does not EXIST and instanceof throws
   else rm.importMemory("env", "mem", 1);
+  const render=RENDERFAST&&RENDERGATE&&RENDERTRY?rm.importFunc("env","RenderTry",[],[VT.i64]):-1;
   rm.setTable(65536); rm.exportTable("tbl");
   const bt = rm.typeIndex([], [VT.i32]);                              // JIT block func type ([]->i32 count)
   const { index, setBody } = rm.func([VT.i32], [VT.i32], "dispatch"); // (budget) -> instr count ran
@@ -197,6 +200,15 @@ function buildRuntime() {
   f.local_get(0); i32c(f, 31); f.op("i32_shr_s"); f.local_set(5);
   f.local_get(0); f.local_get(5); f.op("i32_xor"); f.local_get(5); f.op("i32_sub"); f.local_set(5);
   f.loop(0x40);
+    if(render>=0) {
+      i32c(f,RENDERFAST);f.load("i32_load8_u",0,0);
+      i32c(f,RENDERGATE);i32c(f,RIP);f.load("i32_load",0,2);
+      i32c(f,65535);f.op("i32_and");f.op("i32_add");f.load("i32_load8_u",0,0);
+      f.op("i32_and");f.local_get(1);f.local_get(5);f.op("i32_lt_s");f.op("i32_and");
+      f.if_();f.call(render);i64c(f,0);f.op("i64_ne");f.if_();
+        f.local_get(1);i32c(f,1);f.op("i32_add");f.local_set(1);f.br(2);
+      f.end();f.end();
+    }
     i32c(f, RIP); f.load("i32_load", 0, 2); f.local_set(2); f.local_get(2); f.local_get(2); i32c(f, 16); f.op("i32_shr_u"); f.op("i32_xor"); i32c(f, 0xFFFF); f.op("i32_and"); f.local_set(3); i32c(f, JITRIP); f.local_get(3); i32c(f, 8); f.op("i32_mul"); f.op("i32_add"); f.load("i32_load", 0, 2); f.local_get(2); f.op("i32_eq");
     i32c(f, JITN); f.local_get(3); i32c(f, 8); f.op("i32_mul"); f.op("i32_add"); f.load("i32_load", 0, 2); i32c(f, 0); f.op("i32_gt_s"); f.op("i32_and"); // && g_jit_n[slot] > 0
     f.local_get(1); f.local_get(5); f.op("i32_lt_s"); f.op("i32_and"); f.if_(0x40);
@@ -212,8 +224,13 @@ function buildRuntime() {
     f.end();
   f.end();
   f.local_get(1); setBody([{ count: 6, vt: VT.i32 }], f); rm.exportFunc("dispatch", index);
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(rm.emit())), { env: { mem: MEM,budget:runBudget } }); RUNTBL = inst.exports.tbl; RUNDISP = inst.exports.dispatch; }
-export function jitChain(jitRipOff, jitNOff) { JITRIP = Number(jitRipOff); JITN = Number(jitNOff); buildRuntime(); }
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(rm.emit())), { env: { mem: MEM,budget:runBudget,RenderTry:RENDERTRY } }); RUNTBL = inst.exports.tbl; RUNDISP = inst.exports.dispatch; }
+export function jitChain(jitRipOff,jitNOff,fast=0,gate=0,renderTry=null) {
+  JITRIP=Number(jitRipOff);JITN=Number(jitNOff);
+  RENDERFAST=Number(fast);RENDERGATE=Number(gate);RENDERTRY=renderTry;
+  RUNTBL=RUNDISP=null;
+  buildRuntime();
+}
 // read / write a decoded r/m operand (reg or mem) at size sz. For mem, emitEA(f,m,endRip) must run first.
 function rdRM(f, m, sz, rex) { if (!m.isMem) { rdReg(f, m.rm, sz, rex); return; } if (m.knownRam) { memAddr(f); f.load(LDSZ[sz], 0, ALN[sz]); return; } f.local_get(3); i64c(f, MEMSIZE); f.op("i64_lt_u"); f.if_(VT.i64); memAddr(f); f.load(LDSZ[sz], 0, ALN[sz]); f.else_(); f.local_get(3); i64c(f, sz); f.call(RD_IDX); f.end(); }
 function wrRM(f, m, sz, rex, emitVal) { if (!m.isMem) { wrReg(f, m.rm, sz, rex, emitVal); return; } if (m.knownRam) { memAddr(f); emitVal(); f.store(STSZ[sz], 0, ALN[sz]); return; } f.local_get(3); i64c(f, MEMSIZE); f.op("i64_lt_u"); f.if_(); memAddr(f); emitVal(); f.store(STSZ[sz], 0, ALN[sz]); f.else_(); f.local_get(3); i64c(f, sz); emitVal(); f.call(WR_IDX); f.end(); }
@@ -428,7 +445,15 @@ function codeGuard(f,rip,bytes,onMiss) {
     i32c(f,GBASE+rip+k);f.load("i64_load",0,0);
     i64c(f,view.getBigUint64(k,true));f.op("i64_ne");f.br_if(0);
   }
-  for(;k<bytes.length;k++) {
+  if(k+4<=bytes.length) {
+    i32c(f,GBASE+rip+k);f.load("i32_load",0,0);
+    i32c(f,view.getInt32(k,true));f.op("i32_ne");f.br_if(0);k+=4;
+  }
+  if(k+2<=bytes.length) {
+    i32c(f,GBASE+rip+k);f.load("i32_load16_u",0,0);
+    i32c(f,view.getUint16(k,true));f.op("i32_ne");f.br_if(0);k+=2;
+  }
+  if(k<bytes.length) {
     i32c(f,GBASE+rip+k);f.load("i32_load8_u",0,0);
     i32c(f,bytes[k]);f.op("i32_ne");f.br_if(0);
   }
@@ -528,6 +553,10 @@ export function jitCompile(rip,noFprCache=false,noTopLoop=false) {
       const lo = op & 7, grp = op >> 3;
       if (op === 0x88 || op === 0x89 || op === 0x8A || op === 0x8B) {        // mov
         const sz = (op & 1) ? szV : 1, toReg = (op & 2) !== 0; const m = decodeModRM(j, rexR, rexX, rexB); j = m.j; if (m.isMem) emitEA(f, m, j - GBASE); if (toReg) wrReg(f, m.reg, sz, rex, () => rdRM(f, m, sz, rex)); else wrRM(f, m, sz, rex, () => rdReg(f, m.reg, sz, rex)); handled = true;
+      } else if(op===0xD7) {
+        emitEA(f,{isMem:true,disp:0,base:3,index:-1,scale:1,ripRel:false},j-GBASE);
+        f.local_get(3);rdReg(f,0,1,true);f.op("i64_add");f.local_set(3);
+        wrReg(f,0,1,true,()=>rdRM(f,MEMM,1,true));handled=true;
       } else if (op === 0xC6 || op === 0xC7) {                               // mov r/m, imm
         const sz = op === 0xC6 ? 1 : szV; const m = decodeModRM(j, rexR, rexX, rexB); j = m.j; const v = immSz(j, sz); j += immLen(sz); if (m.isMem) emitEA(f, m, j - GBASE); wrRM(f, m, sz, rex, () => i64c(f, v)); handled = true;
       } else if (op >= 0xB0 && op <= 0xBF) {                                 // mov reg, imm
@@ -688,9 +717,38 @@ export function jitCompile(rip,noFprCache=false,noTopLoop=false) {
         st64(f);
         if (op === 0xFB) { i64c(f, j - GBASE); ifbrk = term = true; n++; i = j; break; }   // STI opens an IF=1 window -> end the block + mark it (a CLI'd timed wait's STI...CLI window was invisible inside a block, starving IRQ delivery)
         handled = true;
-      } else if (op === 0xC0 || op === 0xC1 || op === 0xD0 || op === 0xD1) { // grp2 shift by imm8 / by 1
+      } else if (op === 0xC0 || op === 0xC1 || op === 0xD0 || op === 0xD1) { // grp2 shift/rotate by imm8 / by 1
         const sz = (op & 1) ? szV : 1, byOne = op >= 0xD0; const opn = (U8[j] >> 3) & 7; const mm = decodeModRM(j, rexR, rexX, rexB); j = mm.j; let cnt = byOne ? 1 : (U8[j] & (sz === 8 ? 63 : 31)); if (!byOne) j += 1; if (mm.isMem) emitEA(f, mm, j - GBASE);
-        if ((opn === 4 || opn === 5 || opn === 7) && cnt !== 0) {            // SHL/SHR/SAR (rotates deferred)
+        if(opn<2) {
+          const bits=sz*8,rotate=cnt%bits;
+          rdRM(f,mm,sz,rex);
+          if(sz!==8) {i64c(f,(1n<<BigInt(bits))-1n);f.op("i64_and");}
+          f.local_set(0);f.local_get(0);
+          if(sz===8) {i64c(f,rotate);f.op(opn?"i64_rotr":"i64_rotl");}
+          else if(rotate) {
+            i64c(f,rotate);f.op(opn?"i64_shr_u":"i64_shl");
+            f.local_get(0);i64c(f,bits-rotate);f.op(opn?"i64_shl":"i64_shr_u");
+            f.op("i64_or");i64c(f,(1n<<BigInt(bits))-1n);f.op("i64_and");
+          }
+          f.local_set(2);wrRM(f,mm,sz,rex,()=>f.local_get(2));
+          if(cnt) {
+            f.local_get(2);i64c(f,opn?bits-1:0);f.op("i64_shr_u");
+            i64c(f,1);f.op("i64_and");f.local_set(1);
+            deferPartialFlags(f,g=>{
+              i32c(g,RFL);i32c(g,RFL);ld64(g);
+              i64c(g,cnt===1?~0x801:~1);g.op("i64_and");g.local_get(1);g.op("i64_or");
+              if(cnt===1) {
+                g.local_get(2);i64c(g,bits-1);g.op("i64_shr_u");
+                if(opn) {g.local_get(2);i64c(g,bits-2);g.op("i64_shr_u");}
+                else g.local_get(1);
+                g.op("i64_xor");i64c(g,1);g.op("i64_and");
+                i64c(g,0x800);g.op("i64_mul");g.op("i64_or");
+              }
+              st64(g);
+            });
+          }
+          handled=true;
+        } else if ((opn === 4 || opn === 5 || opn === 7) && cnt !== 0) { // SHL/SHR/SAR
           const bits = sz * 8, hb = bits - 1, mask = sz === 8 ? null : (1n << BigInt(bits)) - 1n;
           rdRM(f, mm, sz, rex); f.local_set(0);                             // v = operand (zero-ext)
           if (opn === 4) {                                                  // SHL: res=(v<<cnt)&m ; CF=(v>>(bits-cnt))&1
@@ -1062,8 +1120,23 @@ export function jitRun(rip) { runBudget.value=0x7FFFFFFFn;const b = blocks.get(r
 // running while the next rip is also a JIT'd block (one host round-trip covers a whole hot loop).
 export function jitDispatch(budget) {
   if (RUNDISP) return RUNDISP(budget);
+  if (U8.buffer!==MEM.buffer) U8=new Uint8Array(MEM.buffer);
   const ripV = new Int32Array(MEM.buffer, RIP, 1);      // fallback (no runtime module yet)
   const brk = budget < 0, bud = brk ? -budget : budget; // negative budget = break-on-IF mode (see buildRuntime)
   let ran = 0;
-  while (ran < bud) { const rip = ripV[0], slot = slotOf(rip); if (blockRip[slot] !== rip) break; const fn = blockFn[slot]; if (!fn||blocks.get(rip).ninstr>bud-ran) break;runBudget.value=BigInt(bud-ran);const r = fn(); const c = r & 0x3FFFFFFF; ran += c; if (c === 0) break; if (brk && (r & 0x40000000)) break; }
+  while (ran<bud) {
+    const rip=ripV[0],slot=slotOf(rip);
+    if (RENDERFAST && RENDERGATE && U8[RENDERFAST] && U8[RENDERGATE+(rip&65535)] &&
+        RENDERTRY && RENDERTRY()) {
+      ran++;
+    } else {
+      if (blockRip[slot]!==rip) break;
+      const fn=blockFn[slot];
+      if (!fn || blocks.get(rip).ninstr>bud-ran) break;
+      runBudget.value=BigInt(bud-ran);
+      const r=fn(),c=r&0x3FFFFFFF;
+      ran+=c;
+      if (!c || brk && r&0x40000000) break;
+    }
+  }
   return ran; }

@@ -58,7 +58,7 @@ This **builds and installs** HEMU under `~/.local/share/HEMU`, adds a TempleOS l
 
 The captured desktop already contains the Welcome card, Take Tour question and native display corrections. HEMU restores matching RAM, registers and disk sectors; it does not run the DVD's 16-bit BIOS loader.
 
-The browser engine executes TempleOS machine code with a HolyC CPU/device interpreter and an x86-to-WASM JIT. Drawing routines run their original guest instructions; HEMU does not replace them by function name. It implements the hardware and instructions used by the supported TempleOS workloads, not a general PC.
+The browser engine executes TempleOS machine code with a HolyC CPU/device interpreter and an x86-to-WASM JIT. Fast graphics accelerates selected stock drawing routines by default. Disable it to execute their original guest instructions; both modes keep the instruction-level JIT. It implements the hardware and instructions used by the supported TempleOS workloads, not a general PC.
 
 [Architecture and supported behavior](Doc/Guide.md) · [Capture recipe](Misc/Capture/README.md)
 

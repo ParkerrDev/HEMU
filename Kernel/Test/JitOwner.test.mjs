@@ -69,4 +69,51 @@ for(const shared of [false,true])for(const code of [
   }
   count++;
 }
-console.log(`${count} JIT ownership cases preserve memory and optional CPU bindings across attachments.`);
+//APs share RAM with core zero, but never its compiled function table.
+const ap=await import('../Jit.js?application-core-owner'),owner=Owner(true),
+  u8=new Uint8Array(owner.memory.buffer),view=owner.view,
+  apReg=2048,apFlags=2176,apRip=2184,tables=0x20000,counts=0xA0000,
+  fast=0x120000,gate=0x130000,slot=(PC^(PC>>>16))&65535,
+  Put=(at,value)=>view.setBigUint64(at,BigInt(value),true),
+  Get=at=>view.getBigUint64(at,true);
+let renderCalls=0,accept=true;
+u8.set([0x48,0xFF,0xC0,0xF4],BASE+PC);
+Attach(owner);jit.jitChain(tables,counts);
+assert.equal(jit.jitCompile(PC),1);Put(tables+slot*8,PC);Put(counts+slot*8,1);Put(REG,50);
+ap.jitState(apReg,apFlags,apRip,BASE,owner.memory,()=>0n,()=>{});
+ap.jitChain(tables,counts); //Rebinding must also discard a previous dispatcher.
+ap.jitChain(0,0,fast,gate,()=>{
+  renderCalls++;if(!accept)return 0n;
+  Put(apReg,Get(apReg)+10n);Put(apRip,PC+3);return 1n;
+});
+Put(apRip,PC);Put(apReg,0);u8[gate+(PC&65535)]=1;
+assert.equal(ap.jitDispatch(1),0,'A BSP cache hit cannot execute in an AP with no local block.');
+assert.equal(Get(REG),50n);assert.equal(ap.jitCompile(PC),1);
+for(const [enabled,value,hits]of [[0,1n,0],[1,11n,1],[0,12n,1],[1,22n,2]]) {
+  u8[fast]=enabled;Put(apRip,PC);
+  assert.equal(ap.jitDispatch(1),1);
+  assert.equal(Get(apReg),value,'Live mode changes precede warm AP instructions.');
+  assert.equal(renderCalls,hits);assert.equal(Get(REG),50n);
+}
+u8[fast]=1;accept=false;Put(apRip,PC);
+assert.equal(ap.jitDispatch(1),1);assert.equal(Get(apReg),23n,'Refused acceleration executes the private original block.');
+u8[BASE+PC+2]=0xC8;Put(apRip,PC);
+assert.equal(ap.jitDispatch(1),0);assert.equal(Get(apReg),23n);
+assert.equal(ap.jitInspect(PC).cached,false,'Changed guest bytes invalidate the AP block.');
+assert.equal(Get(counts+slot*8),1n,'AP invalidation does not write BSP cache metadata.');
+assert.equal(ap.jitCompile(PC),1);assert.equal(ap.jitDispatch(1),1);assert.equal(Get(apReg),22n);
+u8[PC&65535]=1;Put(apRip,PC);const callsBefore=renderCalls;
+ap.jitChain(0,0,fast,0,()=>{renderCalls++;return 1n;});
+assert.equal(ap.jitDispatch(1),1);assert.equal(renderCalls,callsBefore,'An incomplete rendering binding cannot use low memory as a gate.');
+assert.equal(Get(apReg),21n);
+const grown=new WebAssembly.Memory({initial:32,maximum:64});
+ap.jitState(apReg,apFlags,apRip,BASE,grown,()=>0n,()=>{});
+ap.jitChain(0,0,fast,gate,()=>{
+  new DataView(grown.buffer).setBigUint64(apRip,BigInt(PC+3),true);return 1n;
+});
+grown.grow(1);
+new DataView(grown.buffer).setBigUint64(apRip,BigInt(PC),true);
+new Uint8Array(grown.buffer)[fast]=1;new Uint8Array(grown.buffer)[gate+(PC&65535)]=1;
+assert.equal(ap.jitDispatch(1),1,'A private dispatch refreshes its mode/gate view after memory growth.');
+count++;
+console.log(`${count} JIT ownership cases preserve memory, private AP caches, live modes and optional CPU bindings.`);
