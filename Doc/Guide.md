@@ -21,17 +21,17 @@ test. The HolyC test adapter that runs under original V5.03 is headless.
 
 | Path | What |
 |---|---|
-| `Kernel/Cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses, and the HLE hooks |
+| `Kernel/Cpu.HC` | the CPU: fetch, decode and execute for the integer, x87 and SSE instructions TempleOS uses |
 | `Kernel/Dev.HC`, `Kernel/Time.HC`, `Kernel/Kbd.HC` | device state, port I/O, interrupt selection, elapsed clocks and PS/2 keyboard behavior |
 | `Kernel/Mem.HC` | unaligned RAM reads/writes, the guest RAM alias, and saved-guest MMIO/IPI routing |
 | `Kernel/Fpu.HC`, `Kernel/Alu.HC`, `Kernel/MulDiv.HC`, `Kernel/Shift.HC`, `Kernel/Atom.HC` | scalar floating-point, integer arithmetic, full multiply/divide, shifts and supported atomic operations |
 | `Kernel/Except.HC` | bounded long-mode divide exception delivery to the current ring-zero code segment and stack |
 | `Kernel/CpuId.HC` | the explicit virtual CPU identification and capability contract, independent of the host machine |
-| `Kernel/Raster.HC`, `Kernel/Poly.HC`, `Kernel/Video.HC` | source-derived drawing acceleration, integer triangle edge walks and VGA conversion |
+| `Kernel/Video.HC` | completed planar-screen capture for host presentation |
 | `Kernel/Host.HC` | **the host contract**: every function the emulator imports from its host, and the two compiler intrinsics it needs |
 | `Kernel/Core.HC` | per-core CPU state (`CCpuState g_cpu_st[]` behind the `reg` / `rip` / `rfl` accessors) and the SMP and guest-call scaffolding every entry shares |
 | `Kernel/GuestCall.HC` | host-injected guest calls, the backend execution primitive (below) |
-| `Kernel/Snapshot.HC` | the TempleOS entry: resume from the RAM snapshot, HLE of the hot render routines, wall-clock pacing. `HemuInit` once, then `Frame` per display frame |
+| `Kernel/Snapshot.HC` | the TempleOS entry: resume from the RAM snapshot, completed-frame observation and wall-clock pacing. `HemuInit` once, then `Frame` per display frame |
 | `Kernel/SnapRegs.HC`, `Kernel/SnapRegsSmp.HC` | generated: the register state captured together with the RAM snapshot (single-core / four-core) |
 | `Kernel/Boot.HC`, `Kernel/Anim.HC` | small demo entries that run a clang-compiled kernel inside the emulator |
 | `Kernel/Test.HC` | the self-checking instruction battery (`#include "Cpu.HC"`; prints pass / fail counts) |
@@ -136,13 +136,14 @@ assertions and 861 split-field atomic assertions as WASM. The memory and device
 modules also have 324 and 519 independent native output comparisons. The test
 host supplies serialized atomics and headless callbacks; it is not a native
 desktop, disk or JIT implementation.
-Original QEMU/KVM also supplies 200 raster cases: native and accelerated line/
-triangle pixels, depth, collision counts, extents, nearest distance and final
-random seeds agree. A further 30 native cases cover line pixels/depth overlapping
-the task seed, dither probability and each other. Controlled shared-memory
-checks also force another worker to change those fields between random draws;
-per-draw state remains observable. These are bounded checks, not complete x86
-or graphics coverage. Divide faults enter the guest's #DE handler for valid ring-zero,
+Original QEMU/KVM supplies 200 raster reference cases for the original guest's
+line/triangle instructions: pixels, depth, collision counts, extents, nearest
+distance and final random seeds agree. Another 30 cases cover pixel/depth storage
+overlapping the task seed, dither probability and each other. A guest-code test
+changes all seven formerly replaced drawing entries, checks interpreted and
+translated results, then changes their bytes again and rejects stale compiled
+code before any instruction executes. These are bounded checks, not complete
+x86 or graphics coverage. Divide faults enter the guest's #DE handler for valid ring-zero,
 long-mode, IST-zero interrupt/trap gates targeting the current code segment.
 Original QEMU/KVM supplies 1,536 raw entry frames and native `DivZero` catch
 behavior; interpreter/JIT checks preserve the faulting prefix RIP, operands,
@@ -195,12 +196,25 @@ coordinates. ATA transfers support both 16-bit and 32-bit I/O, including REP INS
 writes preserve the 16-color palette and notify the host when colors change. A host must implement both
 `__host_disk` and `__host_disk_wr`.
 
-Interpreter, block JIT and graphics HLE are separate execution layers. Graphics
-fast paths are resolved by the guest's symbol names and reject unsupported
-transforms. Persistent checks compare their pixels, depth and collision results
-against the original guest routines with HLE disabled. The SMP build (`SMP_SNAP`)
-runs one core per host thread over shared memory and has separate worker/barrier
-regressions. Browser networking for TOOM multiplayer is not implemented.
+In current builds, the interpreter and block JIT execute guest x86 instructions, including all
+TempleOS drawing routines. There is no named-function replacement layer and no
+alternative accelerated renderer. The JIT validates compiled code bytes before
+execution so edited or recycled guest code does not reuse a stale translation.
+
+Full machine saves embed their engine. Importing an older save restores that
+older engine and its execution behavior, including any drawing replacements it
+contained. Restart uses the current engine and retains saved C: files; it does
+not retain the old running RAM state. Stock RAM captures use the current engine.
+
+The host still understands some TempleOS internals: it observes completed
+screen-update returns and decodes the guest's planar screen image, writes mouse
+state into guest globals, and injects requested commands as guest function calls.
+Explicit refresh settings patch guest pacing code. Stock images resume a prepared
+desktop with documented native corrections. These integrations remain separate
+from instruction execution; removing drawing replacements does not make HEMU a
+hardware-complete or cycle-accurate PC. The SMP build (`SMP_SNAP`) runs one core per
+host thread over shared memory with worker/barrier regressions. Browser networking
+for TOOM multiplayer is not implemented.
 
 Accesses past RAM are devices only on their own page: the LAPIC at 0xFEE00000
 (ID, version and the ICR that sends IPIs) and the HPET at 0xFED00000 (its main

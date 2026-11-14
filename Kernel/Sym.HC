@@ -12,7 +12,6 @@
 #define TASK_SIGNATURE_VAL	0x536B7354
 #define TASKf_SUSPENDED		2
 #define TASKf_AWAITING_MSG	9
-#define TASKf_NONTIMER_RAND	14
 
 #define HASH_NEXT	0
 #define HASH_STR	8
@@ -252,36 +251,19 @@ U64 GuestCallRet(U64 fun,U64 callee,I64 len)
   return 0;
 }
 
-#define DC_MEMBERS_NUM	23
-#define TASK_MEMBERS_NUM	17
+#define DC_MEMBERS_NUM	3
 
 class CGuestDC
-{//Offsets of the guest's CDC members HEMU reads, in dc_members's order.
-  I64 width,width_internal,height,flags,color,bkcolor,dither_probability_u16,
-	r,x,y,z,cur_x,cur_y,collision_cnt,nearest_dist,min_x,max_x,min_y,max_y,
-	win_task,body,depth_buf,transform;
+{
+  I64 width_internal,height,body;
 } of_dc;
-U8 *dc_members[DC_MEMBERS_NUM]={"width","width_internal","height",
-	"flags","color","bkcolor","dither_probability_u16","r","x","y","z",
-	"cur_x","cur_y","collision_cnt","nearest_dist","min_x","max_x","min_y",
-	"max_y","win_task","body","depth_buf","transform"};
-
-class CGuestTask
-{//Offsets of the guest's CTask members HEMU reads, in task_members's order.
-  I64 wake_jiffy,task_flags,win_left,win_right,win_top,win_bottom,next_task,
-	pix_left,pix_right,pix_top,pix_bottom,scroll_x,scroll_y,scroll_z,
-	win_z_num,rand_seed,popup_task;
-} of_task;
-U8 *task_members[TASK_MEMBERS_NUM]={"wake_jiffy","task_flags",
-	"win_left","win_right","win_top","win_bottom","next_task","pix_left",
-	"pix_right","pix_top","pix_bottom","scroll_x","scroll_y","scroll_z",
-	"win_z_num","rand_seed","popup_task"};
+U8 *dc_members[DC_MEMBERS_NUM]={"width_internal","height","body"};
 
 class CGuestAddr
 {//Addresses of the guest's globals HEMU reads and writes.
   U64 ms_pos,ms_pos_text,ms_lb,ms_rb,ms_hard_installed,jiffies,
 	winmgr_fps,winmgr_ideal_refresh_tS,winmgr_last_refresh_tS,
-	gr_dc2,gr_win_z_buf,sys_winmgr_task,seth_task;
+	gr_dc2,sys_winmgr_task,seth_task;
 } guest;
 
 #define D3_MEMBERS_NUM	3
@@ -316,9 +298,8 @@ Bool GuestNamesFind(U64 task)
 //is missing, and then HEMU only emulates.
   I64 seth;
   if (!GuestSymInit(task) ||
-	!GuestMembersGet("CDC",dc_members,DC_MEMBERS_NUM,&of_dc.width) ||
-	!GuestMembersGet("CTask",task_members,TASK_MEMBERS_NUM,
-	&of_task.wake_jiffy) ||
+	!GuestMembersGet("CDC",dc_members,DC_MEMBERS_NUM,
+	&of_dc.width_internal) ||
 	!GuestMembersGet("CD3I64",d3_members,D3_MEMBERS_NUM,&of_d3.x) ||
 	(seth=GuestMember("CCPU","seth_task"))<0)
     return FALSE;
@@ -335,11 +316,10 @@ Bool GuestNamesFind(U64 task)
   guest.winmgr_last_refresh_tS=
 	GuestVarMember("winmgr","CWinMgrGlbls","last_refresh_tS");
   guest.gr_dc2=GuestVarMember("gr","CGrGlbls","dc2");
-  guest.gr_win_z_buf=GuestVarMember("gr","CGrGlbls","win_z_buf");
   guest.sys_winmgr_task=GuestVar("sys_winmgr_task");
   guest.seth_task=g_cpu_st[0].f_msr_gsbase+seth;
   return guest.ms_pos && guest.ms_pos_text && guest.ms_lb && guest.ms_rb &&
 	guest.ms_hard_installed && guest.jiffies && guest.winmgr_fps &&
 	guest.winmgr_ideal_refresh_tS && guest.winmgr_last_refresh_tS &&
-	guest.gr_dc2 && guest.gr_win_z_buf && guest.sys_winmgr_task;
+	guest.gr_dc2 && guest.sys_winmgr_task;
 }

@@ -30,17 +30,11 @@ async function RunAp({core,mem,ctrl:control,wasmBytes,heapAbi,busProtocol,requir
   const ctrl=new Int32Array(control),hot=new Map();
   if(busProtocol!==undefined&&busProtocol!==BUS_VERSION)throw new Error("Unsupported shared bus protocol");
   const bus=busProtocol===BUS_VERSION?CoreBus(ctrl,core,sc?.ncore):null;
-  let inst,base=0;
+  let inst;
   const host=createHemuHost({...(heapAbi===undefined?{}:{heapAbi}),onText:s=>{if(s.includes("BADOP"))postMessage({cmd:"log",msg:`core${core} ${s.trim()}`});}});
   Object.assign(host.env,{
     mem,
-    __jit_state:(rg,fl,rp)=>{jit.jitState(rg,fl,rp,base,mem,inst.exports.RdMem,inst.exports.WrMem,inst.exports.RasterHLE);return 1n;},
-    __jit_compile:r=>BigInt(jit.jitCompile(Number(r))),
-    __jit_run:r=>BigInt(jit.jitRun(Number(r))),
-    __jit_x87:(...args)=>jit.jitX87(...args),
-    __jit_dispatch:b=>BigInt(jit.jitDispatch(Number(b))),
-    __jit_chain:(...args)=>jit.jitChain(...args),
-    __jit_seg:(...args)=>jit.jitSeg(...args.map(Number)),
+    ...jit.jitImports(()=>inst.exports),
     __ap_run:(rip,budget)=>{
       const address=Number(rip);
       if(!jit.jitInspect(address).cached){
@@ -51,7 +45,6 @@ async function RunAp({core,mem,ctrl:control,wasmBytes,heapAbi,busProtocol,requir
     }
   });
   if(bus)Object.assign(host.env,bus.Imports());
-  jit.jitReset();
   const mod=await WebAssembly.compile(wasmBytes);
   inst=await WebAssembly.instantiate(mod,{env:host.env});
   inst.exports.__core.value=BigInt(core);
@@ -61,7 +54,7 @@ async function RunAp({core,mem,ctrl:control,wasmBytes,heapAbi,busProtocol,requir
   Atomics.store(ctrl,8+core,1);Atomics.notify(ctrl,8+core);
   while(!Atomics.load(ctrl,0)&&!Atomics.load(ctrl,1))Atomics.wait(ctrl,0,0,100);
   if(Atomics.load(ctrl,1))return;
-  base=Number(inst.exports.RamBase());inst.exports.CoreAttach();
+  inst.exports.CoreAttach();
   postMessage({cmd:"log",msg:`AP${core} parallel`});
   let spins=0,faulted=false;
   while(!Atomics.load(ctrl,1)){

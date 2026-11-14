@@ -18,28 +18,15 @@ if(process.argv.includes("--record")) {
 }
 const expected=JSON.parse(readFileSync(file,"utf8"));
 assert.equal(hash,expected.sourceHash,"regenerate original V5.03 evidence after changing the probe");
-const h=await GuestHarness({exports:["RasterEnabled","RasterCount"],extraSource:`
-U0 RasterEnabled(Bool on)
-{
-  if (on) {g_raster_n=2;g_poly3_hle=GuestFun("GrFillPoly3");}
-  else {g_raster_n=0;g_poly3_hle=0;}
+const h=await GuestHarness(),{ex,gx,base,Name}=h;
+await h.Exec(source.toString("latin1"));
+const ptr=Number(ex.GuestVar(Name("alias_res"))),
+  cnt=gx.rd64(Number(ex.GuestVar(Name("alias_cnt")))),dv=new DataView(ex.memory.buffer),rows=[];
+assert.equal(cnt,30);
+for(let i=0;i<cnt;i++) {
+  const values=[];
+  for(let j=0;j<7;j++)values.push(dv.getBigUint64(base+ptr+(i*7+j)*8,true).toString(16).toUpperCase().padStart(16,"0"));
+  rows.push(values.join(" ")+" ");
 }
-I64 RasterCount() {return g_raster_calls;}`}),{ex,gx,base,Name}=h;
-let fast=0;
-for(const enabled of [false,true]) {
-  ex.RasterEnabled(enabled?1n:0n);
-  const before=ex.RasterCount();
-  await h.Exec(source.toString("latin1"));
-  const ptr=Number(ex.GuestVar(Name("alias_res"))),
-    cnt=gx.rd64(Number(ex.GuestVar(Name("alias_cnt")))),dv=new DataView(ex.memory.buffer),rows=[];
-  assert.equal(cnt,30);
-  for(let i=0;i<cnt;i++) {
-    const values=[];
-    for(let j=0;j<7;j++)values.push(dv.getBigUint64(base+ptr+(i*7+j)*8,true).toString(16).toUpperCase().padStart(16,"0"));
-    rows.push(values.join(" ")+" ");
-  }
-  assert.equal(rows.join("\n")+"\n",expected.out,`original QEMU/KVM raster parity; acceleration=${enabled}`);
-  if(!enabled)assert.equal(ex.RasterCount(),before,"native path must not call HLE");
-  else {fast=Number(ex.RasterCount()-before);assert.ok(fast>0,"enabled run exercises raster acceleration");}
-}
-console.log(`Raster: 30 original QEMU/KVM cases match native and accelerated pixels, depth, changed/collision counts, probability and random seed (${fast} accelerated spans).`);
+assert.equal(rows.join("\n")+"\n",expected.out,"original QEMU/KVM raster parity");
+console.log(`Raster: 30 original QEMU/KVM cases match emulated guest pixels, depth, changed/collision counts, probability and random seed.`);

@@ -26,10 +26,7 @@ U64 CpuInitProbe(I64 core,I64 field)
  if(smp)host.env.mem=new WebAssembly.Memory({initial:8192,maximum:8192,shared:true});
  Object.assign(host.env,{
   __host_ns:()=>16000000n,__host_budget:()=>12000000n,
-  __jit_state:(r,f,p)=>{jit.jitState(r,f,p,base,inst.exports.memory,inst.exports.RdMem,inst.exports.WrMem,inst.exports.RasterHLE);return 1n;},
-  __jit_compile:r=>BigInt(jit.jitCompile(Number(r))),__jit_dispatch:n=>BigInt(jit.jitDispatch(Number(n))),
-  __jit_run:r=>BigInt(jit.jitRun(Number(r))),__jit_x87:(...args)=>jit.jitX87(...args),
-  __jit_chain:(...args)=>jit.jitChain(...args),__jit_seg:(...args)=>jit.jitSeg(...args.map(Number))
+  ...jit.jitImports(()=>inst.exports)
  });
  ({instance:inst}=await WebAssembly.instantiate(compiled.bytes,{env:host.env}));host.attach(inst);
  const ex=inst.exports;ex.__rt_init();ex.HemuInit();

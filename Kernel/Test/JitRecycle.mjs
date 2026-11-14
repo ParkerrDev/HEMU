@@ -25,14 +25,7 @@ const host = createHemuHost({ onText: (s) => { if (s && s.indexOf("BADOP") >= 0)
 host.env.__host_key = () => -1n; host.env.__host_budget = () => 12000000n; host.env.__host_dt = () => 16n;
 const NOJIT = !!process.env.NOJIT;
 if (!NOJIT) {
-  host.env.__jit_state = (rg, fl, rp) => { jit.jitState(rg, fl, rp, gBase, inst.exports.memory, inst.exports.RdMem, inst.exports.WrMem, inst.exports.RasterHLE); return 1n; };
-  host.env.__jit_compile = (rip) => BigInt(jit.jitCompile(Number(rip)));
-  host.env.__jit_run = (rip) => BigInt(jit.jitRun(Number(rip)));
-  host.env.__jit_x87 = (a, b, c) => jit.jitX87(a, b, c);
-  host.env.__jit_dispatch = (b) => BigInt(jit.jitDispatch(Number(b)));
-  host.env.__jit_chain = (a, b) => jit.jitChain(a, b); host.env.__jit_seg = (...a) => jit.jitSeg(...a.map(Number));
-  if (jit.jitCodeMap) host.env.__jit_inval = (lo, hi) => jit.jitInvalidate(Number(lo), Number(hi));
-  jit.jitReset();
+  Object.assign(host.env,jit.jitImports(()=>inst.exports));
 }
 inst = await WebAssembly.instantiate(mod, { env: host.env }); host.attach(inst); inst.exports.__rt_init();
 let gx = null, frames = 0;

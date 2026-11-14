@@ -61,10 +61,10 @@ this correction changes newly built engines without changing saved state.
   and decode FPS only when the actual top-line glyphs are readable.
 - Barrier checks reject stale acknowledgements and hold application-core writes
   for the duration of each capture.
-- Raster checks compare pixels, depth, returned pixel counts and collision state
-  against the guest's original compiled V5.03 functions with their HLE disabled.
-  They cover horizontal and vertical clipping, degenerate triangles, depth,
-  normal/XOR/collision colors, ordered dithering, and seeded triangle samples.
+- Raster checks execute the guest's original compiled V5.03 functions and
+  compare pixels, depth, counts and RNG state with independent QEMU/KVM fixtures.
+- Guest-code checks edit all seven formerly replaced drawing entries and execute
+  their bytes with the interpreter and JIT, including rejecting a stale translation.
 - Worker checks run the production worker and AP workers with one and four
   cores. They independently read every sampled top row, compare its displayed
   FPS to the frame message, check clock/refresh pacing, and verify pause.
@@ -306,35 +306,23 @@ Kernel/Test/Divide.test.mjs --record`; ordinary runs verify source/evidence hash
 The bounded entry behavior follows Intel's [System Programming Guide,
 sections 6.12 to 6.15](https://cdrdv2-public.intel.com/812386/253668-sdm-vol-3a.pdf).
 
-`Raster.HC` owns the named native line/polygon acceleration and its shared
-span filler. `RasterNative.mjs` compares 200 source-hashed original QEMU/KVM
-cases with native execution and acceleration in HEMU: horizontal/vertical
-lines and triangles, clipping, reversed endpoints, all raster modes, ordered
-and probability dithering, recorded extents, nearest distance and draw-disabled
-contexts. Pixel/depth storage, changed/collision counts and final RNG state
-must agree. Regenerate with `HOLYC_QEMU_ORACLE=... node Kernel/Test/RasterNative.mjs --record`.
+`RasterNative.mjs` compares 200 source-hashed original QEMU/KVM cases with the
+original guest instructions in HEMU: horizontal/vertical lines and triangles,
+clipping, reversed endpoints, raster modes, ordered/probability dithering,
+recorded extents, nearest distance and draw-disabled contexts. Pixel/depth
+storage, changed/collision counts and final RNG state must agree. Regenerate
+with `HOLYC_QEMU_ORACLE=... node Kernel/Test/RasterNative.mjs --record`.
 
-`RasterAlias.mjs` adds 30 source-hashed original QEMU/KVM cases in which
-pixel or depth storage overlaps the task seed, dither probability or each
-other. All three raster operations and both line orientations run with HLE
-on and off. `RasterState.test.mjs` forces a real second Worker to change the
-seed, task flags, probability or clock at selected draws of an eight-pixel
-span in shared memory. Its 16 cases compare pixels, depth, return count and
-final seed with the frozen pre-change fixture. This is a controlled-clock
-HEMU fixture, separate from the original-QEMU alias oracle; it does not claim
-hardware TSC values. A test-only draw boundary permits those interleavings,
-with a bounded wait; no callback or state cache is added to production.
-Caching probability at span entry fails the forced-write test. One configured
-CPU does not prove exclusive access to shared memory.
+`RasterAlias.mjs` adds 30 original QEMU/KVM cases in which pixel or depth storage
+overlaps the task seed, dither probability or each other. The reference fixtures
+are independent of HEMU. Removed replacement algorithms and their frozen
+implementation fixtures are not retained as a second rendering path.
 
-`RasterFallback.test.mjs` retains two negative witnesses: a valid 5,000-pixel
-line previously consumed one RNG value before fallback, and a wide triangle
-returned -1 without drawing. Rejection now precedes random sampling, and
-unsupported polygon contexts fall back before any triangle starts. Existing
-extent/nearest updates before line fallback remain idempotent, matching final
-native state; the change does not claim a general transaction for arbitrary
-malformed guest pointers. `Raster.test.mjs` additionally checks 674 native
-triangle/line results, including every pixel/depth value and collision state.
+`GuestCode.test.mjs` writes distinctive x86 instructions at the seven drawing
+entries that previously dispatched replacements. Both interpreter and JIT must
+execute them. After another code edit, the old translation must execute zero
+instructions and the newly compiled body must return the changed result. Original
+bytes are restored before ordinary guest execution resumes.
 
 ## Frame protocol
 
@@ -576,13 +564,10 @@ to resume an interrupted filesystem operation. The legacy SMP demo's BSP now
 adapts to the same production worker; APs no longer import a second BSP or the
 site's game catalog.
 
-Video checks run the original V5.03 assembly with acceleration disabled, then
-compare the generic planar/line implementations and their actual named HLE
-entry points. They cover cache hits/misses, flush writes, destination guards,
-pointer increments, registers and flags. The full framebuffer matches the
-native planar decoder; native 2x zoom is checked pixel by pixel; DCScrnCapture
-returns a populated desktop image. Completed presentation now follows the
-actual GrUpdateVGAGraphics call, preserving the native image and zoom updates.
+Video checks compare the captured framebuffer with the original guest's planar
+decoder; native 2x zoom is checked pixel by pixel, and DCScrnCapture returns a
+populated desktop image. Presentation observes the GrUpdateVGAGraphics return,
+preserving the guest's image and zoom updates without replacing its instructions.
 Pause force-sends that completed frame before its acknowledgement even when
 older frames are waiting for the page, so a paused restore shows identical
 pixels. `WorkerPause.test.mjs` deliberately fills the presentation queue to cover
@@ -606,9 +591,9 @@ AutoComplete for installation, or rewrites entry jumps during stock startup.
 [The capture guide](../../Misc/Capture/README.md) records the preparation inputs
 and the original native source provenance.
 
-`MenuClip.test.mjs` checks 288 completed frames against independent QEMU/KVM
+`MenuClip.test.mjs` checks 144 completed frames against independent QEMU/KVM
 pixels: the stock Ctrl+M Titanium sprite at six native scrollbar positions,
-with raster/video acceleration enabled and disabled. `MenuClipOracle.mjs`
+executing the original guest drawing routines. `MenuClipOracle.mjs`
 records 48 unmodified V5.03 frames, which alternate between blank and visible
 tails, then verifies 24 corrected native refreshes at each position. The
 prepared-capture test checks that incremental frames reuse cached bounds

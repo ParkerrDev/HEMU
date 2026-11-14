@@ -11,13 +11,27 @@ const blocks = new Map();                  // entry rip -> { fn, ninstr }  (comp
 const blockFn = new Array(65536).fill(null);   // fast dispatch arrays, indexed by slotOf(rip)
 const blockRip = new Int32Array(65536).fill(-1);
 const slotOf = (r) => (r ^ (r >>> 16)) & 0xFFFF;   // MUST match Cpu.HC/Snapshot.HC: hash (not low bits) so 0x10000-multiple-apart code copies don't fight over one slot
-export function jitState(reg,rfl,rip,gbase,memObj,rdMem,wrMem,rasterHLE) {
+export function jitImports(getExports) {
+  return {
+    __jit_state(reg,flags,pc) {
+      const ex=getExports();
+      jitState(reg,flags,pc,ex.RamBase(),ex.memory,ex.RdMem,ex.WrMem);
+      return 1n;
+    },
+    __jit_compile:pc=>BigInt(jitCompile(Number(pc))),
+    __jit_run:pc=>BigInt(jitRun(Number(pc))),
+    __jit_dispatch:budget=>BigInt(jitDispatch(Number(budget))),
+    __jit_x87:jitX87,
+    __jit_chain:jitChain,
+    __jit_seg:jitSeg
+  };
+}
+export function jitState(reg,rfl,rip,gbase,memObj,rdMem,wrMem) {
   // Compiled modules import an owner's memory and callbacks permanently.
   jitReset();JITRIP=JITN=0;RUNTBL=RUNDISP=null;
   jitX87(0,0,0);jitSeg(0,0,0,0,0,0);
   REG=Number(reg);RFL=Number(rfl);RIP=Number(rip);GBASE=Number(gbase);
   MEM=memObj;U8=new Uint8Array(memObj.buffer);RDMEM=rdMem;WRMEM=wrMem;
-  RASTERHLE=rasterHLE||null;
 }
 export function jitSeg(fs, gs, tsc, cw, xlo, xhi) { MSRFS = Number(fs); MSRGS = Number(gs); TSC = Number(tsc) || 0;
   X87CW = Number(cw) || 0; XMMLO = Number(xlo) || 0; XMMHI = Number(xhi) || 0; }   // FS/GS base + tsc byte-offsets; optional FPU-cw/XMM offsets gate FXSAVE/FXRSTOR compilation (older 3-arg callers just leave FX ops interp'd)
@@ -164,16 +178,13 @@ function fIntValue(f,bits,trunc)
 // ---- WASM dispatch module: a persistent runtime that call_indirects JIT'd blocks back-to-back in NATIVE
 // wasm (zero JS per block) until an un-JIT'd rip. The block fns live in its funcref table (table.set on
 // compile); it reads rip + hemu's g_jit_rip[]/g_jit_n[] (offsets from jitChain) to verify each block. ----
-let JITRIP = 0, JITN = 0, RUNTBL = null, RUNDISP = null, RASTERHLE = null;
+let JITRIP = 0, JITN = 0, RUNTBL = null, RUNDISP = null;
 const runBudget=new WebAssembly.Global({value:"i64",mutable:true},0x7FFFFFFFn);
-// RasterHLE owns named-hook matching. Its availability must not depend on
-// the direct-mapped block cache: ordinary guest code can evict those slots.
 function buildRuntime() {
   if (!RIP || !JITRIP || !MEM) return; const rm = new Module();
   const left=rm.importGlobal("env","budget",VT.i64,true);
   if (MEM && typeof SharedArrayBuffer !== "undefined" && MEM.buffer instanceof SharedArrayBuffer) rm.importMemory("env", "mem", 1, 8192, true);   // shared guest RAM (SMP): import must declare shared (+max). typeof-guard: without cross-origin isolation the global does not EXIST and instanceof throws
   else rm.importMemory("env", "mem", 1);
-  const HLE = RASTERHLE != null, RH = HLE ? rm.importFunc("env", "RasterHLE", [], [VT.i64]) : 0;   // imports MUST precede defined funcs -> import first
   rm.setTable(65536); rm.exportTable("tbl");
   const bt = rm.typeIndex([], [VT.i32]);                              // JIT block func type ([]->i32 count)
   const { index, setBody } = rm.func([VT.i32], [VT.i32], "dispatch"); // (budget) -> instr count ran
@@ -185,7 +196,6 @@ function buildRuntime() {
   f.local_get(0); i32c(f, 31); f.op("i32_shr_u"); f.local_set(6);
   f.local_get(0); i32c(f, 31); f.op("i32_shr_s"); f.local_set(5);
   f.local_get(0); f.local_get(5); f.op("i32_xor"); f.local_get(5); f.op("i32_sub"); f.local_set(5);
-  if (HLE) f.block(0x40);                                             // outer block: an HLE fall-through (RasterHLE->0) exits here
   f.loop(0x40);
     i32c(f, RIP); f.load("i32_load", 0, 2); f.local_set(2); f.local_get(2); f.local_get(2); i32c(f, 16); f.op("i32_shr_u"); f.op("i32_xor"); i32c(f, 0xFFFF); f.op("i32_and"); f.local_set(3); i32c(f, JITRIP); f.local_get(3); i32c(f, 8); f.op("i32_mul"); f.op("i32_add"); f.load("i32_load", 0, 2); f.local_get(2); f.op("i32_eq");
     i32c(f, JITN); f.local_get(3); i32c(f, 8); f.op("i32_mul"); f.op("i32_add"); f.load("i32_load", 0, 2); i32c(f, 0); f.op("i32_gt_s"); f.op("i32_and"); // && g_jit_n[slot] > 0
@@ -198,17 +208,11 @@ function buildRuntime() {
       f.local_get(4); i32c(f, 0x3FFFFFFF); f.op("i32_and"); i32c(f, 0); f.op("i32_ne");                                 // count != 0
       f.local_get(6); f.local_get(4); i32c(f, 30); f.op("i32_shr_u"); i32c(f, 1); f.op("i32_and"); f.op("i32_and"); f.op("i32_eqz");   // !(brk && IF-window flag)
       f.op("i32_and"); f.br_if(1);                                                                                      // chain on; else fall out (Cpu.HC delivers)
-      f.local_get(1);f.return_(); //An IRQ or instruction fallback must reach Run before another hook.
+      f.local_get(1);f.return_();
     f.end();
-    if (HLE) {
-      f.local_get(1); f.local_get(5); f.op("i32_lt_s"); f.if_(0x40);
-        f.call(RH); f.op("i32_wrap_i64"); f.local_set(4); f.local_get(1); f.local_get(4); f.op("i32_add"); f.local_set(1); f.local_get(4); f.br_if(1); f.br(2);   // handled(1)->continue loop ; fall-through(0)->exit outer block
-      f.end();
-    }
-  f.end();                                                           // loop
-  if (HLE) f.end();                                                  // outer block
+  f.end();
   f.local_get(1); setBody([{ count: 6, vt: VT.i32 }], f); rm.exportFunc("dispatch", index);
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(rm.emit())), { env: HLE ? { mem: MEM, RasterHLE: RASTERHLE,budget:runBudget } : { mem: MEM,budget:runBudget } }); RUNTBL = inst.exports.tbl; RUNDISP = inst.exports.dispatch; }
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(rm.emit())), { env: { mem: MEM,budget:runBudget } }); RUNTBL = inst.exports.tbl; RUNDISP = inst.exports.dispatch; }
 export function jitChain(jitRipOff, jitNOff) { JITRIP = Number(jitRipOff); JITN = Number(jitNOff); buildRuntime(); }
 // read / write a decoded r/m operand (reg or mem) at size sz. For mem, emitEA(f,m,endRip) must run first.
 function rdRM(f, m, sz, rex) { if (!m.isMem) { rdReg(f, m.rm, sz, rex); return; } if (m.knownRam) { memAddr(f); f.load(LDSZ[sz], 0, ALN[sz]); return; } f.local_get(3); i64c(f, MEMSIZE); f.op("i64_lt_u"); f.if_(VT.i64); memAddr(f); f.load(LDSZ[sz], 0, ALN[sz]); f.else_(); f.local_get(3); i64c(f, sz); f.call(RD_IDX); f.end(); }

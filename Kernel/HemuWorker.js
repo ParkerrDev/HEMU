@@ -398,18 +398,9 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
   host.env.__host_budget = () => BigInt(curBudget | 0);
   host.env.__host_dt = () => BigInt(dtMs | 0);
   host.env.__host_ns = () => BigInt(dtNs);
-  // ---- JIT wiring: blocks read hemu's shared state at the offsets passed via __jit_state/__jit_x87/__jit_chain;
-  //      __jit_state returns 1 to ENABLE (return 0n / ?nojit -> pure interpreter). See Jit.js. ----
   let inst;
   if (!NOJIT) {
-    host.env.__jit_state = (rg, fl, rp) => { jit.jitState(rg, fl, rp, gBase, inst.exports.memory, inst.exports.RdMem, inst.exports.WrMem, inst.exports.RasterHLE); return 1n; };
-    host.env.__jit_compile = (rip) => BigInt(jit.jitCompile(Number(rip)));
-    host.env.__jit_run = (rip) => BigInt(jit.jitRun(Number(rip)));
-    host.env.__jit_x87 = (a, b, c) => jit.jitX87(a, b, c);
-    host.env.__jit_dispatch = (b) => BigInt(jit.jitDispatch(Number(b)));
-    host.env.__jit_chain = (a, b) => jit.jitChain(a, b);
-    host.env.__jit_seg = (...a) => jit.jitSeg(...a.map(Number));
-    jit.jitReset();
+    Object.assign(host.env,jit.jitImports(()=>inst.exports));
     console.log("[hemu] JIT enabled (x86-64 -> WASM)");
   } else console.log("[hemu] JIT disabled (?nojit) - pure interpreter");
 

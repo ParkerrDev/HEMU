@@ -9,7 +9,6 @@ U8 g_pfx[256];                       // prefix-byte lookup (1 = legacy prefix) -
 // PER-CORE state (reg/rip/rfl/halted/irq_stall/fpu/seg/decode/icount) lives in CCpuState g_cpu_st[] - defined
 // in Core.HC (included above), accessed through #define reg CST.f_reg etc. (CST = this instance's MyCore
 // slot). SHARED state (mem, devices, JIT cache, clocks, cr*, idtr/gdtr) stays below.
-U64 g_hle_blit;                      // entry addr of the transparent compositor blit to run natively (0=off)
 U8 *g_desk;                          // last COMPLETE frame (desktop + the OS's own cursor), captured tear-free
 I64 g_desk_ready,g_desk_seq,g_present_seq; U64 g_capture_rip,g_capture_text;
 U64 g_jit_on;                        // 0 = pure interpreter (zero-init; a JIT host sets it 1 after wiring __jit_*).
@@ -18,10 +17,7 @@ U64 g_jit_rip[65536];                // direct-mapped block cache: the rip occup
                                      // same low 16 bits for EVERY corresponding block -> permanent slot ping-pong)
 I64 g_jit_n[65536];                  // that block's instr count (>0 = JIT'd), 0 = tried+unjittable, -1 = still counting
 I64 g_jit_hot[65536];                // per-slot hotness counter until the compile threshold (64)
-U8 g_hooktbl[65536];                 // rip&0xFFFF -> "maybe a special address" gate: lets Step() skip the four
-                                     // 64-bit hook compares for the ~98% of instructions that aren't at one.
-                                     // 16-bit (was 8-bit): an 8-bit gate forced every hot fn sharing a hook's
-                                     // low byte to stay interp'd -> never JIT'd (was 48% of all chain-breaks).
+U8 g_capture_gate[65536];
 U64 g_badop;
 // system state: control regs, descriptor tables, MSRs, TSC, code/stack segments
 U64 cr0, cr2, cr3, cr4, cr8, g_cs, g_ss; U64 idtr_base, idtr_limit, gdtr_base, gdtr_limit;
@@ -333,26 +329,6 @@ U0 Op0F()
     case 0xAD: DecodeModRM(); DoShld(0, RdReg(rg, sz), RdReg(1, 1), sz); break;  // SHRD r/m,r,CL
     default: g_badop = 0x0F00 | op2; halted = 2; "BADOP0F op2=%X rip=%X\n", op2, rip; break; } }
 
-//---------------------------------------------------------------- one instruction
-U0 HleBlit()
-{//DCBlotColor8(dc,img) natively: img's width_internal*height bytes onto dc,
-//leaving TRANSPARENT (0xFF) ones. Pops its return and 2 args as it does.
-  U64 ret=RdMem(reg[4],8),dst_dc=RdMem(reg[4]+8,8),src_dc=RdMem(reg[4]+16,8),
-	sb=RdMem(src_dc+of_dc.body,8),db=RdMem(dst_dc+of_dc.body,8);
-  I64 w=RdMem(src_dc+of_dc.width_internal,4)&0xFFFF,
-	h=RdMem(src_dc+of_dc.height,4)&0xFFFF,n=w*h,i,v;
-  if (sb && db && sb<mem_size && db<mem_size && n>0 && sb+n<=mem_size &&
-	  db+n<=mem_size)
-    for (i=0;i<n;i++) {
-      v=mem[sb+i];
-      if (v!=0xFF)
-	mem[db+i]=v;
-    }
-  reg[0]=n;
-  reg[4]+=24;
-  rip=ret;
-}
-
 U0 CaptureFrom(U64 bd)
 {//The finished 640x480 frame at bd into g_desk.
   I64 k;
@@ -372,19 +348,15 @@ U0 CaptureDesk()
   VideoCapture;
 }
 
-#include "Raster"
-
 U0 Step()
 {
   U64 op, a, b, r, fault_rip=rip; I64 sz, d, opn, r2, imm;
 
-  if (g_hooktbl[rip & 0xFFFF]) {                   // gate: only ~1.5% of rips need the four hook compares
-    if (RasterHLE) return;
-    if (rip == g_hle_blit) { HleBlit(); return; }   // native fast-path for the dominant compositor blit
+  if (g_capture_gate[rip&0xFFFF]) {
     if (rip==g_capture_text)
       CaptureFrom(GuestU64(GuestU64(guest.gr_dc2)+of_dc.body));
-    if (rip == g_capture_rip) CaptureDesk();        // grab the finished frame (incl. native cursor) tear-free
-
+    if (rip==g_capture_rip)
+      CaptureDesk;
   }
   pfx66 = 0; repf = 0; hasRex = 0; rexW = 0; rexR = 0; rexX = 0; rexB = 0; g_segbase = 0; lockf = 0; op = mem[rip]; rip++;
   while (g_pfx[op]) {                                  // legacy prefixes (one table lookup, not 11 compares)
@@ -654,7 +626,7 @@ I64 RunCore(I64 budget)
     if (halted==1)
       break;
     b=0;
-    if (!g_hooktbl[rip&0xFFFF])
+    if (!g_capture_gate[rip&0xFFFF])
       b=__ap_run(rip,lim-icount);
     if (!b) {
       Step;
@@ -688,7 +660,7 @@ U0 Run(I64 maxi)
       TimeRun(cap);
     } else {
       b=0;
-      if (g_jit_on && !g_hooktbl[rip&0xFFFF]) {
+      if (g_jit_on && !g_capture_gate[rip&0xFFFF]) {
         slot=(rip^(rip>>16))&0xFFFF;
         if (g_jit_rip[slot]==rip && g_jit_n[slot]>0) {
           if (pending && !(rfl&F_IF))
