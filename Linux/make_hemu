@@ -14,7 +14,7 @@ mkdir -p "$D" ~/.local/share/applications
 
 echo Make HEMU
 cc -O2 HEMU.CPP -o "$D/HEMU.new" -lasound
-zcat ../live-smp.bin.gz | cp --sparse=always /dev/stdin "$D/RAM.BIN.new"
+python3 ../Misc/Ram.py ../live-smp.bin.gz "$D/RAM.BIN.new"
 cp ../capture-smp.txt "$D/Regs.TXT.new"
 
 #The disk: the qcow2's clusters laid flat, then the sectors the capture

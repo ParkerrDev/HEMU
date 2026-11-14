@@ -9,6 +9,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+from Ram import Pack as RamPack
 
 
 def Hash(path):
@@ -40,9 +41,10 @@ def Pack(base,one,four,out):
                     raise ValueError("Changed capture artifact: "+name)
             suffix="-smp" if cores==4 else ""
             ram=f"live{suffix}.bin.gz";overlay=f"stock{suffix}.disk";registers=f"capture{suffix}.txt"
-            with (folder/"live.bin").open("rb") as src,(out/ram).open("wb") as stream:
+            packed=RamPack((folder/"live.bin").read_bytes())
+            with (out/ram).open("wb") as stream:
                 with gzip.GzipFile(filename="",mode="wb",fileobj=stream,compresslevel=9,mtime=0) as dst:
-                    shutil.copyfileobj(src,dst)
+                    dst.write(packed)
             with (temp/"base.raw").open("rb") as a,(folder/"disk.raw").open("rb") as b:
                 with mmap.mmap(a.fileno(),0,access=mmap.ACCESS_READ) as old,mmap.mmap(b.fileno(),0,access=mmap.ACCESS_READ) as new:
                     if len(old)!=len(new):raise ValueError("Changed disk dimensions")
@@ -50,7 +52,7 @@ def Pack(base,one,four,out):
             (out/overlay).write_bytes(patch)
             shutil.copyfile(folder/"registers.txt",out/registers)
             subprocess.run(["node",str(Path(__file__).with_name("RegsMk.mjs")),str(out/registers),str(out/"Kernel"/("SnapRegsSmp.HC" if cores==4 else "SnapRegs.HC"))],check=True)
-            record={"cores":cores,"ram":ram,"ramBytes":402653184,"ramSha256":Hash(folder/"live.bin"),
+            record={"cores":cores,"ram":ram,"ramBytes":402653184,"packedBytes":len(packed),"ramSha256":Hash(folder/"live.bin"),
                 "gzipSha256":Hash(out/ram),"registers":registers,"registerSha256":Hash(out/registers),
                 "sourceSha256":Hash(out/"Kernel"/("SnapRegsSmp.HC" if cores==4 else "SnapRegs.HC")),"parserSha256":Hash(Path(__file__).with_name("Regs.mjs")),"overlay":overlay,"overlayBytes":len(patch),
                 "overlaySha256":Hash(out/overlay),"diskSha256":Hash(folder/"disk.raw"),"evidence":evidence}

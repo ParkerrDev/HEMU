@@ -12,16 +12,17 @@
       "cores": 1,
       "ram": "live.bin.gz",
       "ramBytes": 402653184,
-      "ramSha256": "e111895458da2d0bb4f26f58d8e4d020ff8fbd229d907a2c4a0703b0a16b4f69",
-      "gzipSha256": "95011614748141aa2c23d8f2110ff7e898773448a0d893a2243c16583e18b9e8",
+      "packedBytes": 37770616,
+      "ramSha256": "13a5623669137edabaf72d7b9154875f2a0725a107f5a0e36ee910e832c87f5f",
+      "gzipSha256": "1dff353072a1faf85bf4f6729d59de65a2cf2ce2eca9b84aa75ec911ee6fd1d4",
       "registers": "capture.txt",
-      "registerSha256": "1e5ac6efc7be37fc3e4c34a9b59ace04176fd2cf877313dd469a40d58932e253",
-      "sourceSha256": "110bc8ea2b2b87a732ea3e785b9cbf7fc380bfae824227e15bc00aac5fb56fa2",
+      "registerSha256": "7a99dfd660fca92a177a9c9c7deb5801bbc07743369066df352c9053f0adcce7",
+      "sourceSha256": "3bb14a64c002220df312d060d70722d3edb3605f61a09d36971a24f81337bbb7",
       "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
       "overlay": "stock.disk",
-      "overlayBytes": 2580,
-      "overlaySha256": "894ceacb281d444e58508622008fbbe34c93db435233053976065a1d1bef86e3",
-      "diskSha256": "c3ffa2b67733d6615e10f46c304c30f2ed98f3bd5a3b1e7bc6c8c4f69d441b63",
+      "overlayBytes": 84108,
+      "overlaySha256": "c7d3a2c416248f071d00bc3f34589eca3ffb5bbdd6190593cb0d27a1171a1eab",
+      "diskSha256": "7116c60e067124f38bcccd529b159f0aea60cccdc0107b06af362e942e71eb7e",
       "evidence": {
         "backend": "QEMU emulator version 11.1.2",
         "accel": "kvm",
@@ -29,29 +30,68 @@
         "inputDiskSha256": "ca12b5604c2f1d9fe83a7f910ce131f0bf074e1d33f24aa68fd4fad34198d148",
         "inputRawDiskSha256": "f8673e751d7e313b6552ac5688c31a4ea19148326a7d560b103217f004e1322a",
         "fontSha256": "7f15a2b20ae01e909fa8cf6f87301cfdb618fd63f2e42fe1ac454c37865c32b2",
-        "captureScriptSha256": "235aa7655206a66bb838563c3851eeba525ba506ef5d8fc356d1aff3447ec594",
+        "captureScriptSha256": "dd69827b0ca8da95949bbd2db7839600f2a9e7d18f850ae721bfa6ceb81bf8f0",
         "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
-        "samples": 7,
+        "preparation": {
+          "inputs": {
+            "Original/Sources.json": "3086f115fc25bb5108fe6f60dd6343e97db7772ce8097684aa8c83606f90a42d",
+            "Original/DocRecalc.HC": "d247772529187719b9ae4eb85f139a9b8a182169ec57379387aa6c1d68f53760",
+            "DocClip.HC": "bb8c594fc0df377408570a089e88b86e7bc788b19c9fc6a9bb55a512ec222966",
+            "Original/ACTask.HC": "531790c0e5d20cf3d17310835675a35d1879abb0b5d16edaffe6e3d29a644422",
+            "ACDblBuf.HC": "b7ea083a25730974a3f0073bad84433cd3fd3f1bff40dcdd31d74f9df2261f74",
+            "Original/HomeSys.HC": "0ceb6445e7425f3f9e5d6e8214cd4b4e5ef1c6c412c4ec82d98f12a5b3cfd5e7",
+            "Welcome.HC": "c187cc780b5b998e2a14bd48c6e798e08ffc7cb5bee4567622272019d11d3cb9",
+            "Welcome.DAT": "8d37c17bce4322f1fc179081056f5dd005acad43b42b96b647e768f9a0e8f504",
+            "Prepare.mjs": "20665fdee0b562d0fa524ef3551f845ddcc7143cc84cff1334fe26a4861c2413"
+          },
+          "outputs": {
+            "Adam/DolDoc/DocRecalc.HC.Z": "c1bd60fb9a4332627ffcdf1ef6f913fb47c9412f210654ab8ef697b42871bf46",
+            "Adam/AutoComplete/ACTask.HC.Z": "858f70e9f952d579b29c3fd5cb495bb0fb38fac8c5ba1eb3ee5bb7dcb71134e2",
+            "/HomeSys.HC.Z": "a4b35056e4a6809e0ffc581cced2da79a945ff79a67142437bf02a05cb98c3bf",
+            "Home/Welcome.DAT": "8d37c17bce4322f1fc179081056f5dd005acad43b42b96b647e768f9a0e8f504"
+          },
+          "originals": [
+            {
+              "dir": "Adam/DolDoc",
+              "name": "DocRecalc.HC.Z",
+              "encodedSha256": "5a6c9f42cb22114e4bf9298d0d60a96c81cb5e64a64b4eba5c7bdc46c8d98d26",
+              "sourceSha256": "d247772529187719b9ae4eb85f139a9b8a182169ec57379387aa6c1d68f53760"
+            },
+            {
+              "dir": "Adam/AutoComplete",
+              "name": "ACTask.HC.Z",
+              "encodedSha256": "48365fadb11246c92d835518e4d7813d8481022d2e4859cff562c1654fe0e2bb",
+              "sourceSha256": "531790c0e5d20cf3d17310835675a35d1879abb0b5d16edaffe6e3d29a644422"
+            },
+            {
+              "dir": "",
+              "name": "HomeSys.HC.Z",
+              "encodedSha256": "45242e8e8f56e2ee4821a04e342b9d537694011f889b900ccaf28312904cc46f",
+              "sourceSha256": "0ceb6445e7425f3f9e5d6e8214cd4b4e5ef1c6c412c4ec82d98f12a5b3cfd5e7"
+            }
+          ]
+        },
+        "samples": 2,
         "files": {
           "live.bin": {
             "bytes": 402653184,
-            "sha256": "e111895458da2d0bb4f26f58d8e4d020ff8fbd229d907a2c4a0703b0a16b4f69"
+            "sha256": "13a5623669137edabaf72d7b9154875f2a0725a107f5a0e36ee910e832c87f5f"
           },
           "disk.raw": {
             "bytes": 268435456,
-            "sha256": "c3ffa2b67733d6615e10f46c304c30f2ed98f3bd5a3b1e7bc6c8c4f69d441b63"
+            "sha256": "7116c60e067124f38bcccd529b159f0aea60cccdc0107b06af362e942e71eb7e"
           },
           "registers.txt": {
             "bytes": 2121,
-            "sha256": "1e5ac6efc7be37fc3e4c34a9b59ace04176fd2cf877313dd469a40d58932e253"
+            "sha256": "7a99dfd660fca92a177a9c9c7deb5801bbc07743369066df352c9053f0adcce7"
           },
-          "snapregs.HC": {
-            "bytes": 2277,
-            "sha256": "110bc8ea2b2b87a732ea3e785b9cbf7fc380bfae824227e15bc00aac5fb56fa2"
+          "SnapRegs.HC": {
+            "bytes": 2286,
+            "sha256": "3bb14a64c002220df312d060d70722d3edb3605f61a09d36971a24f81337bbb7"
           },
           "captured.ppm": {
             "bytes": 921615,
-            "sha256": "f3b327d289455b0d1118235aa5ac3796a8a6c52967642408cf3e62bdc3320a21"
+            "sha256": "e470f412c9262835ec58a44260249729a6afdd964d699987327673e4ec3a7a00"
           }
         }
       }
@@ -60,16 +100,17 @@
       "cores": 4,
       "ram": "live-smp.bin.gz",
       "ramBytes": 402653184,
-      "ramSha256": "9176bddf6143130e1241c0b52326afee196361db9c91ff8433c81a8389af643d",
-      "gzipSha256": "a0ad4d37aedebf29582e435cbebf464a7e8272d082b15e1b25986d320e4fb9e4",
+      "packedBytes": 37812584,
+      "ramSha256": "e5a5b080f3c301a7e07ff1ef69ef456aa20da92f853ba29c3a5d599af7316a6d",
+      "gzipSha256": "d0659946054608ca750fffabcc3a6a14f99e5bb673a4e6a7dad0bba5b804300c",
       "registers": "capture-smp.txt",
-      "registerSha256": "3e1e28a6f82329f73597aa1cd3b269d032e42f407339acafbf9448e4e8847fbb",
-      "sourceSha256": "6ad326531be221c42d3469f8b3410f0369ca41897d859c6547c73f79ef18350e",
+      "registerSha256": "01416591d17f7878704b3920058236ca4b5ef5eb7e6143bbd41bde0d4bf16808",
+      "sourceSha256": "0963de3fc6b5fb3ff67eae5e3e3505abb5af85d540b0acb2c572b3f301e8acb1",
       "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
       "overlay": "stock-smp.disk",
-      "overlayBytes": 2580,
-      "overlaySha256": "48f88f298896a57bd1d1ecec881c6cb253336b9c85c6f3cccdcae1705861c32b",
-      "diskSha256": "00df5d900e1c507b41a19797710f7da68b9d9a7983535f1e4517932924b1ce87",
+      "overlayBytes": 84108,
+      "overlaySha256": "a2c0b8fb7ace1863be51eb20ea3d62d4fa8b0fd2791b89edb7dade7bc3e727dd",
+      "diskSha256": "908e66d630f25f8946656352e0ccd2920d75a388c4ac93c9522a37ca3ec31f8b",
       "evidence": {
         "backend": "QEMU emulator version 11.1.2",
         "accel": "kvm",
@@ -77,29 +118,68 @@
         "inputDiskSha256": "ca12b5604c2f1d9fe83a7f910ce131f0bf074e1d33f24aa68fd4fad34198d148",
         "inputRawDiskSha256": "f8673e751d7e313b6552ac5688c31a4ea19148326a7d560b103217f004e1322a",
         "fontSha256": "7f15a2b20ae01e909fa8cf6f87301cfdb618fd63f2e42fe1ac454c37865c32b2",
-        "captureScriptSha256": "235aa7655206a66bb838563c3851eeba525ba506ef5d8fc356d1aff3447ec594",
+        "captureScriptSha256": "dd69827b0ca8da95949bbd2db7839600f2a9e7d18f850ae721bfa6ceb81bf8f0",
         "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
-        "samples": 6,
+        "preparation": {
+          "inputs": {
+            "Original/Sources.json": "3086f115fc25bb5108fe6f60dd6343e97db7772ce8097684aa8c83606f90a42d",
+            "Original/DocRecalc.HC": "d247772529187719b9ae4eb85f139a9b8a182169ec57379387aa6c1d68f53760",
+            "DocClip.HC": "bb8c594fc0df377408570a089e88b86e7bc788b19c9fc6a9bb55a512ec222966",
+            "Original/ACTask.HC": "531790c0e5d20cf3d17310835675a35d1879abb0b5d16edaffe6e3d29a644422",
+            "ACDblBuf.HC": "b7ea083a25730974a3f0073bad84433cd3fd3f1bff40dcdd31d74f9df2261f74",
+            "Original/HomeSys.HC": "0ceb6445e7425f3f9e5d6e8214cd4b4e5ef1c6c412c4ec82d98f12a5b3cfd5e7",
+            "Welcome.HC": "c187cc780b5b998e2a14bd48c6e798e08ffc7cb5bee4567622272019d11d3cb9",
+            "Welcome.DAT": "8d37c17bce4322f1fc179081056f5dd005acad43b42b96b647e768f9a0e8f504",
+            "Prepare.mjs": "20665fdee0b562d0fa524ef3551f845ddcc7143cc84cff1334fe26a4861c2413"
+          },
+          "outputs": {
+            "Adam/DolDoc/DocRecalc.HC.Z": "c1bd60fb9a4332627ffcdf1ef6f913fb47c9412f210654ab8ef697b42871bf46",
+            "Adam/AutoComplete/ACTask.HC.Z": "858f70e9f952d579b29c3fd5cb495bb0fb38fac8c5ba1eb3ee5bb7dcb71134e2",
+            "/HomeSys.HC.Z": "a4b35056e4a6809e0ffc581cced2da79a945ff79a67142437bf02a05cb98c3bf",
+            "Home/Welcome.DAT": "8d37c17bce4322f1fc179081056f5dd005acad43b42b96b647e768f9a0e8f504"
+          },
+          "originals": [
+            {
+              "dir": "Adam/DolDoc",
+              "name": "DocRecalc.HC.Z",
+              "encodedSha256": "5a6c9f42cb22114e4bf9298d0d60a96c81cb5e64a64b4eba5c7bdc46c8d98d26",
+              "sourceSha256": "d247772529187719b9ae4eb85f139a9b8a182169ec57379387aa6c1d68f53760"
+            },
+            {
+              "dir": "Adam/AutoComplete",
+              "name": "ACTask.HC.Z",
+              "encodedSha256": "48365fadb11246c92d835518e4d7813d8481022d2e4859cff562c1654fe0e2bb",
+              "sourceSha256": "531790c0e5d20cf3d17310835675a35d1879abb0b5d16edaffe6e3d29a644422"
+            },
+            {
+              "dir": "",
+              "name": "HomeSys.HC.Z",
+              "encodedSha256": "45242e8e8f56e2ee4821a04e342b9d537694011f889b900ccaf28312904cc46f",
+              "sourceSha256": "0ceb6445e7425f3f9e5d6e8214cd4b4e5ef1c6c412c4ec82d98f12a5b3cfd5e7"
+            }
+          ]
+        },
+        "samples": 2,
         "files": {
           "live.bin": {
             "bytes": 402653184,
-            "sha256": "9176bddf6143130e1241c0b52326afee196361db9c91ff8433c81a8389af643d"
+            "sha256": "e5a5b080f3c301a7e07ff1ef69ef456aa20da92f853ba29c3a5d599af7316a6d"
           },
           "disk.raw": {
             "bytes": 268435456,
-            "sha256": "00df5d900e1c507b41a19797710f7da68b9d9a7983535f1e4517932924b1ce87"
+            "sha256": "908e66d630f25f8946656352e0ccd2920d75a388c4ac93c9522a37ca3ec31f8b"
           },
           "registers.txt": {
             "bytes": 8484,
-            "sha256": "3e1e28a6f82329f73597aa1cd3b269d032e42f407339acafbf9448e4e8847fbb"
+            "sha256": "01416591d17f7878704b3920058236ca4b5ef5eb7e6143bbd41bde0d4bf16808"
           },
-          "snapregs.HC": {
-            "bytes": 7328,
-            "sha256": "6ad326531be221c42d3469f8b3410f0369ca41897d859c6547c73f79ef18350e"
+          "SnapRegs.HC": {
+            "bytes": 7332,
+            "sha256": "0963de3fc6b5fb3ff67eae5e3e3505abb5af85d540b0acb2c572b3f301e8acb1"
           },
           "captured.ppm": {
             "bytes": 921615,
-            "sha256": "da93d94458f74501c8b993b8e51c84f296cb7232655f6dd8878917b885e77e98"
+            "sha256": "9ea03e94a73eff1c8259c5a0de42d677e94fbcbfd3993de66ba084c4d3984f9a"
           }
         }
       }

@@ -1,16 +1,18 @@
 # HEMU: TempleOS V5.03 from a capture
 
-HEMU resumes a captured, already booted TempleOS V5.03 desktop, unmodified. It does not execute the
-DVD's 16-bit BIOS loader or install from disk. There are two machines for the capture:
+HEMU resumes a captured, already booted TempleOS V5.03 desktop. The stock
+capture includes native document-clipping and autocomplete display corrections,
+a Welcome card and the OS's Take Tour question. It does not execute the DVD's
+16-bit BIOS loader or install from disk. Two backends run the capture:
 
-- `Linux/`: on an x86-64 Linux the processor runs TempleOS itself, through KVM. One C file is the rest
-  of the PC, in a Wayland window. It opens in about 10 ms. See [Linux](#linux).
-- `Kernel/`: anywhere else, an x86-64 emulator written entirely in HolyC. It reaches the outside world
-  through one small host contract, so any HolyC compiler whose runtime implements that contract can
-  build and run it. [HolyC-wasm](https://github.com/ParkerrDev/HolyC-wasm) compiles it to WebAssembly,
-  and [TempleOS-Web](https://github.com/ParkerrDev/TempleOS-Web) is a complete host for that build in a
-  browser: its `Kernel/` implements the contract (with an x86 to WASM block JIT), its `Kernel/Test/` are
-  the harnesses, and its `Kernel/Snapshot/` are the recipes that produce the captures kept here.
+- `Linux/`: on x86-64 Linux, KVM runs TempleOS on the host processor. A C host
+  supplies the rest of the PC and a Wayland window. See [Linux](#linux).
+- `Kernel/`: a HolyC x86-64 CPU/device emulator with a JavaScript browser host,
+  workers and x86-to-WASM block JIT.
+  [HolyC-wasm](https://github.com/ParkerrDev/HolyC-wasm) compiles the emulator;
+  HEMU pins that compiler in `Siblings.txt` and mounts it at `holyc-wasm/`.
+  [TempleOS-Web](https://github.com/ParkerrDev/TempleOS-Web) and HEMU's standalone
+  desktop use this runtime. HEMU owns its build, tests and capture recipes.
 
 The small `Boot.HC` framebuffer kernel is an instruction and device fixture, not a TempleOS cold-boot
 test. The HolyC test adapter that runs under original V5.03 is headless.
@@ -35,8 +37,11 @@ test. The HolyC test adapter that runs under original V5.03 is headless.
 | `Kernel/Test.HC` | the self-checking instruction battery (`#include "Cpu.HC"`; prints pass / fail counts) |
 | `stock.json`, `stock.disk`, `stock-smp.disk` | validated capture identities and exact paired disk sector overlays |
 | `capture.txt`, `capture-smp.txt` | original stopped native CPU register dumps, including FPU/XMM state |
-| `live.bin.gz`, `live-smp.bin.gz` | the booted-desktop RAM snapshots the entries resume (384 MiB flat images, gzipped) |
-| `templeos-hd.qcow2.gz` | the base disk both captures were taken on (`stock.json` has its hashes; TempleOS-Web still serves its own copy of the same bytes from `vendor/images/`) |
+| `live.bin.gz`, `live-smp.bin.gz` | lossless sparse RAM captures: gzipped nonzero 64-byte ranges reconstructing 384 MiB |
+| `templeos-hd.qcow2.gz` | immutable base disk for both captures; `stock.json` binds its hashes and each overlay |
+| `Kernel/*.js`, `Kernel/Test/`, `Kernel/Desktop/` | browser runtime, machine tests and standalone desktop; see [Kernel](Kernel/README.md) |
+| `Kernel/Build.mjs`, `Misc/Server.mjs`, `Siblings.txt` | engine build, standalone server and compiler pin |
+| `Misc/Capture/`, `Misc/Pack.py`, `Misc/Ram.py` | native preparation/capture, packaging and sparse RAM format |
 | `Linux/HEMU.CPP`, `Linux/make_hemu` | the KVM machine and the script that builds and installs it |
 
 ## Linux
@@ -71,15 +76,15 @@ two, that line and `~/.local/share/applications/HEMU.desktop`.
   throws `Drv` as for a drive that is not there.
 - `make_hemu` may run while HEMU is open: it moves new files over the old ones, and the running
   machine keeps the ones it mapped until it ends or reboots.
-- RAM and disk are private copies of the capture: what TempleOS writes is gone when HEMU ends, as on a
-  reload of TempleOS-Web.
+- RAM and disk are private copies of the capture: writes are gone when this Linux host ends.
+  The browser runtime separately supports persistent C: storage in IndexedDB.
 - With `capture.txt`, `live.bin.gz` and `stock.disk` in place of the four-core files, the same program
   runs the one-core capture: it makes one processor for each block of the register dump.
 - It is for x86-64 with KVM and Wayland only. Another CPU, macOS or a host without KVM uses the HolyC
   emulator in `Kernel/`.
 
-Measured on an i9-14900HX under Hyprland: the first frame is committed 7 to 10 ms after the program
-starts; TempleOS's `CPURep` reports "004 Cores 2.418GHz"; `Demo/MultiCore/MPPrint` prints from all four
+Earlier measurements on an i9-14900HX under Hyprland, before the prepared Welcome
+captures: the first frame was committed 7 to 10 ms after the program started; TempleOS's `CPURep` reports "004 Cores 2.418GHz"; `Demo/MultiCore/MPPrint` prints from all four
 cores; `Demo/Games/CastleFrankenstein` holds FPS:30 with one host core about 5 percent busy; `Snd(60)`
 and `Beep` come out at 437 and 491 Hz.
 
@@ -89,7 +94,7 @@ and `Beep` come out at 437 and 491 Hz.
 native stopped CPU register set and disk. `stock.disk` and `stock-smp.disk`
 contain only changed 512-byte sectors against the recorded original base disk.
 A host must validate that pairing before execution; a RAM-only image contains
-no CPU state of its own. TempleOS-Web enforces this through the generated
+no CPU state of its own. The browser runtime enforces this through the generated
 module's `hemu.stock` metadata and refuses unknown or mismatched RAM imports.
 Full saved-machine images retain their separate self-contained restore path.
 
@@ -98,8 +103,8 @@ They require all live x87 stacks to be empty because HEMU does not represent
 architectural 80-bit x87 values or tags. The raw native register dumps remain
 available for audit. Initial PIC/PIT/RTC state is still synthesized by the
 existing startup policy, not captured from QEMU; all CPUs being halted does
-not establish device-state equivalence. See TempleOS-Web's
-`Kernel/Snapshot/README.md` for the independent capture and validation commands.
+not establish device-state equivalence. See
+[the capture recipe](Misc/Capture/README.md) for independent capture and validation commands.
 
 ## The host contract
 
@@ -152,20 +157,21 @@ time; `Frame` pulls input, runs the instruction budget the host asked for, and p
 
 ## Building and running
 
-With holyc-wasm, compile `Kernel/Snapshot.HC` in strict mode (every `import` prototype in `Host.HC` becomes a
-WebAssembly import) and export what your host calls back into; then implement the contract on top of
-holyc-wasm's `createHost()`. TempleOS-Web does exactly this: `Kernel/Compile.js` and `Kernel/Build.mjs` are
-the build, `Kernel/Host.js` the host, `Kernel/Jit.js` the optional JIT. From that checkout, with this one
-cloned or symlinked beside it as `hemu`:
+`Kernel/Compile.js` compiles `Kernel/Snapshot.HC` in strict mode, making the
+`Host.HC` declarations WebAssembly imports and exporting the functions the host
+calls. `Kernel/Host.js` implements that contract using HolyC-wasm's `createHost()`;
+`Kernel/Jit.js` supplies the optional JIT. From this repository, with the pinned
+compiler at `holyc-wasm/`:
 
 ```sh
-node Kernel/Build.mjs build                    # hemu.wasm + hemu-smp.wasm + hemu-smp.json
-node Kernel/Test/Measure.mjs                    # Kernel/Test.HC, the self-checking battery, headless
-node Kernel/Test/BootTest.mjs                  # Kernel/Boot.HC: the demo kernel draws its framebuffer
+node Kernel/Build.mjs                         # build/hemu*.wasm and SMP metadata
+node Kernel/Test/Measure.mjs                  # self-checking instruction battery
+node Kernel/Test/BootTest.mjs                 # demo kernel framebuffer
 ```
 
-The guest harnesses - boot the desktop, run catalog games, compare the JIT against the interpreter,
-exercise the guest-execution API - are in `Kernel/Test/`, documented in `Kernel/README.md`.
+See [Kernel/README.md](Kernel/README.md) for compiler setup, the standalone
+browser window, complete machine checks and startup/storage behavior. Tests
+live with HEMU; website shell and catalog integration tests stay with the site.
 
 ## Backend guest execution
 
@@ -175,7 +181,7 @@ the current task's stack, the callee runs with IF=0, and when it returns to the 
 interrupted CPU state is restored bit-exactly. The callee's side effects on guest memory persist; nothing
 else does. This is the discipline TempleOS itself uses for IRQ1, so the JobQue family (TaskExe, JobResScan,
 PopUp) is safe by construction. Only core 0 injects; a callee that faults or exceeds its budget is reported
-as failed and the interrupted state is still restored. TempleOS-Web's `Kernel/GuestExec.js` is the host-side
+as failed and the interrupted state is still restored. `Kernel/GuestExec.js` is the host-side
 API over it (`exec`, `include`, `mkdir`, `writeFile`, `launch`).
 
 ## Devices and performance
@@ -203,7 +209,7 @@ the VGA planes through that same alias, at alias+0xA0000. Decoding by page
 offset alone once made pixel stores at offset 0x300 send IPIs whose vector
 was pixel data; an exception vector crashed an AP, and the BSP, left in
 single-user mode, ran only the window manager. Those stores are now ignored
-(TempleOS-Web `Kernel/Test/MmioAlias.test.mjs`).
+(`Kernel/Test/MmioAlias.test.mjs`).
 
 `Kernel/Atom.HC` owns memory read/modify/write operations, including implicit-lock
 XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG/8B/16B and bit changes.
@@ -300,14 +306,20 @@ node Misc/RegsMk.mjs capture-smp.txt
 ```
 
 `Misc/Pack.py` packages verified native captures with their base disk and
-generated sources under `Kernel/`. The capture recipes live in TempleOS-Web's
-`Kernel/Snapshot/`; the site reads the resulting files from its HEMU mount.
-The stock
-images stop at TempleOS's own "Take Tour(y or n)?" question, so a visitor answers it, as on a
-fresh install.
+generated sources under `Kernel/`. [Misc/Capture/README.md](Misc/Capture/README.md)
+documents source preparation, native capture and the Welcome bitmap's historical
+provenance. The site reads the resulting files from its HEMU mount. Both stock
+captures already show the Welcome card and TempleOS's own "Take Tour(y or n)?"
+question, ready for a visitor's answer. Display corrections are compiled before
+capture rather than installed while the browser loads.
+
+The RAM payload stores adjacent nonzero 64-byte blocks as sparse ranges before
+gzip compression. `Misc/Ram.py` packs or expands it; `Kernel/Ram.js` validates and
+restores it in the browser. Zero-filled guest memory supplies omitted ranges.
+The native Linux installer expands the same capture into its flat RAM file.
 
 The web host can also save and restore a complete live machine. Its versioned
 container includes the exact compiled engine, every core and device's state,
 guest memory, host input/settings, and the full current disk. SnapshotResume
 reconnects the host JIT and displays the saved frame without resetting the CPU.
-See TempleOS-Web/Kernel/Test/README.md for the format and round-trip tests.
+See [Kernel/Test/README.md](Kernel/Test/README.md#full-machine-snapshots) for the format and round-trip tests.

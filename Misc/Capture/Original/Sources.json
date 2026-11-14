@@ -1,0 +1,20 @@
+[
+  {
+    "dir": "Adam/DolDoc",
+    "name": "DocRecalc.HC.Z",
+    "encodedSha256": "5a6c9f42cb22114e4bf9298d0d60a96c81cb5e64a64b4eba5c7bdc46c8d98d26",
+    "sourceSha256": "d247772529187719b9ae4eb85f139a9b8a182169ec57379387aa6c1d68f53760"
+  },
+  {
+    "dir": "Adam/AutoComplete",
+    "name": "ACTask.HC.Z",
+    "encodedSha256": "48365fadb11246c92d835518e4d7813d8481022d2e4859cff562c1654fe0e2bb",
+    "sourceSha256": "531790c0e5d20cf3d17310835675a35d1879abb0b5d16edaffe6e3d29a644422"
+  },
+  {
+    "dir": "",
+    "name": "HomeSys.HC.Z",
+    "encodedSha256": "45242e8e8f56e2ee4821a04e342b9d537694011f889b900ccaf28312904cc46f",
+    "sourceSha256": "0ceb6445e7425f3f9e5d6e8214cd4b4e5ef1c6c412c4ec82d98f12a5b3cfd5e7"
+  }
+]

@@ -96,19 +96,3 @@ U64 GuestInfo(I64 which)	     // read-only probes for the host (no globals map n
   return 0;
 }
 
-I64 GuestPatchJump(U64 addr,U64 target)
-{//Keep PUSH RBP/MOV RBP,RSP intact for suspended task entry contexts.
-//The host holds the all-core barrier; replace one 7-byte SUB RSP only.
-  I64 i;
-  if (!addr || addr+11>RAM_SIZE || addr+11>mem_size || !target ||
-	target+11>RAM_SIZE || target+11>mem_size ||
-	GuestU32(addr)!=0xEC8B4855 || GuestU32(target)!=0xEC8B4855 ||
-	GuestU32(addr+4)&0xFFFFFF!=0xEC8148 ||
-	GuestU32(target+4)&0xFFFFFF!=0xEC8148)
-    return -1;
-  for (i=0;i<MaxI64(g_ncore,1);i++)
-    if (addr+4<=g_cpu_st[i].f_rip<addr+11) return 0;
-  mem[addr+4]=0xE9;
-  WrMem(addr+5,4,target-addr-5);
-  return 1;
-}
