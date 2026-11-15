@@ -42,7 +42,7 @@ gzip compression. The `HMRAM001` payload stores adjacent nonzero 64-byte blocks
 as offset/length ranges, followed by their bytes. Omitted blocks are all zero;
 expansion reconstructs the original 384 MiB byte for byte. `stock.json` binds
 both the compressed payload and full RAM hashes, and records `packedBytes`
-for bounded decompression. `Kernel/Ram.js` validates and restores those ranges
+for bounded decompression. `holyc-wasm/Apps/HEMU/Kernel/Ram.js` validates and restores those ranges
 in the browser. The native Linux installer uses `Misc/Ram.py` to expand the
 same file into its flat `RAM.BIN`.
 

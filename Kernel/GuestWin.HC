@@ -6,6 +6,9 @@ public class CWebWin
   I64 task_num,detached,owned,show,seq;
   CDC *dc;
   U32 *text;
+  U8 *gui;
+  CDC *image;
+  I64 gui_focus,gui_press;
 };
 
 public CWebWin web_wins[WEB_WINS_NUM];
@@ -53,6 +56,8 @@ U0 WebWinFree(CWebWin *w)
 {
   DCDel(w->dc);
   Free(w->text);
+  Free(w->gui);
+  DCDel(w->image);
   MemSet(w,0,sizeof(CWebWin));
 }
 
@@ -420,10 +425,136 @@ public U0 WebWinDoc(I64 slot,U8 *st)
   }
 }
 
+class CWebGuiCmd
+{
+  I32 kind,x,y,width,height,color,id,size;
+};
+
+U0 WebGuiDraw(CTask *task,CDC *dc)
+{
+  I64 slot=WebWinFind(task),i,cnt;
+  CWebWin *w;
+  CWebGuiCmd *c;
+  U8 *end,*payload;
+  if (slot<0 || !(w=&web_wins[slot])->gui)
+    return;
+  if (!(24<=*w->gui(U32 *)<=0x100000))
+    return;
+  end=w->gui+*w->gui(U32 *);
+  cnt=w->gui(U32 *)[1];
+  dc->color=w->gui(U32 *)[4]&15;
+  GrRect(dc,0,0,task->pix_width,task->pix_height);
+  c=w->gui+24;
+  for (i=0;i<cnt && c(U8 *)+sizeof(CWebGuiCmd)<=end;i++) {
+    payload=c(U8 *)+sizeof(CWebGuiCmd);
+    if (c->size<0 || payload+c->size>end)
+      break;
+    dc->color=c->color&15;
+    switch (c->kind) {
+      case 1:
+	GrRect(dc,c->x,c->y,c->width,c->height);
+	break;
+      case 2:
+	if (c->size && !payload[c->size-1])
+	  GrPrint(dc,c->x,c->y,"%s",payload);
+	break;
+      case 3:
+	if (0<c->width<=640 && 0<c->height<=480 &&
+	    ((c->width+7)&~7)*c->height<=c->size) {
+	  w->image->width=c->width;
+	  w->image->width_internal=(c->width+7)&~7;
+	  w->image->height=c->height;
+	  w->image->body=payload;
+	  GrBlot(dc,c->x,c->y,w->image);
+	}
+	break;
+      case 4:
+	if (c->id==w->gui_focus) {
+	  dc->color=YELLOW;
+	  GrRect(dc,c->x,c->y,c->width,1);
+	  GrRect(dc,c->x,c->y+c->height-1,c->width,1);
+	}
+    }
+    c=payload+c->size;
+  }
+}
+
+public U8 *WebWinGuiAlloc(I64 slot)
+{
+  CWebWin *w;
+  if (!(0<=slot<WEB_WINS_NUM))
+    return NULL;
+  w=&web_wins[slot];
+  if (!w->owned || !WebWinValid(w))
+    return NULL;
+  if (!w->gui) {
+    w->gui=CAlloc(0x100000,adam_task);
+    w->image=DCNew(8,1,adam_task,TRUE);
+    w->image->flags=DCF_ALIAS;
+    w->task->draw_it=&WebGuiDraw;
+    DocClear(DocPut(w->task));
+  }
+  return w->gui;
+}
+
+I64 WebGuiHit(CWebWin *w,I64 x,I64 y,I64 after=-1,I64 kind=4)
+{
+  I64 i,cnt,id=0,first=0;
+  CWebGuiCmd *c;
+  U8 *end,*payload;
+  Bool found=FALSE;
+  if (!w->gui || !(24<=*w->gui(U32 *)<=0x100000))
+    return 0;
+  end=w->gui+*w->gui(U32 *);
+  cnt=w->gui(U32 *)[1];
+  c=w->gui+24;
+  for (i=0;i<cnt && c(U8 *)+sizeof(CWebGuiCmd)<=end;i++) {
+    payload=c(U8 *)+sizeof(CWebGuiCmd);
+    if (c->size<0 || payload+c->size>end)
+      break;
+    if (c->kind==kind) {
+      if (!first)
+	first=c->id;
+      if (after>=0) {
+	if (found)
+	  return c->id;
+	found=c->id==after;
+      } else if (c->x<=x<c->x+c->width && c->y<=y<c->y+c->height)
+	id=c->id;
+    }
+    c=payload+c->size;
+  }
+  if (after>=0)
+    return first;
+  return id;
+}
+
+U0 WebWinAction(I64 slot,I64 id)
+{
+  CWebWin *w=&web_wins[slot];
+  I64 flags;
+wa_wait:
+  while (web_action_head-web_action_tail>=64 && web_win_enabled)
+    Sleep(1);
+  flags=GetRFlags;
+  CLI
+  if (web_action_head-web_action_tail>=64 && web_win_enabled) {
+    SetRFlags(flags);
+    goto wa_wait;
+  }
+  if (web_win_enabled) {
+    web_actions[web_action_head%64*3]=slot;
+    web_actions[web_action_head%64*3+1]=w->task_num;
+    web_actions[web_action_head%64*3+2]=id;
+    web_action_head++;
+  }
+  SetRFlags(flags);
+}
+
 U0 WebWinTask(I64 slot)
 {
   CWebWin *w=&web_wins[slot];
-  I64 arg1,arg2,msg,flags;
+  I64 arg1,arg2,msg,id,scroll,kind,z=ms.pos.z;
   DocTermNew;
   DocCursor(OFF);
   WinBorder(ON);
@@ -438,30 +569,53 @@ U0 WebWinTask(I64 slot)
   WinToTop;
   WinZBufUpdate;
   while (TRUE) {
-    msg=GetMsg(&arg1,&arg2,1<<MSG_CMD|1<<MSG_KEY_DOWN);
-    if (msg==MSG_CMD) {
-wa_wait:
-      while (web_action_head-web_action_tail>=64 && web_win_enabled)
-	Sleep(1);
-      flags=GetRFlags;
-      CLI
-      if (web_action_head-web_action_tail>=64 && web_win_enabled) {
-	SetRFlags(flags);
-	goto wa_wait;
+    msg=ScanMsg(&arg1,&arg2,1<<MSG_CMD|1<<MSG_KEY_DOWN|
+	  1<<MSG_MS_L_DOWN|1<<MSG_MS_L_UP);
+    if (w->gui && Fs==sys_focus_task && z!=ms.pos.z) {
+      scroll=WebGuiHit(w,ms.pos.x-Fs->pix_left,ms.pos.y-Fs->pix_top,-1,5);
+      if (scroll) {
+	kind=1;
+	if (ms.pos.z>z)
+	  kind=2;
+	WebWinAction(slot,0x100000+scroll*16+kind);
       }
-      if (web_win_enabled) {
-	web_actions[web_action_head%64*3]=slot;
-	web_actions[web_action_head%64*3+1]=w->task_num;
-	web_actions[web_action_head%64*3+2]=arg1;
-	web_action_head++;
-      }
-      SetRFlags(flags);
+    }
+    z=ms.pos.z;
+    if (msg==MSG_CMD)
+      WebWinAction(slot,arg1);
+    if (w->gui && msg==MSG_MS_L_DOWN)
+      w->gui_press=w->gui_focus=WebGuiHit(w,arg1,arg2);
+    if (w->gui && msg==MSG_MS_L_UP) {
+      id=WebGuiHit(w,arg1,arg2);
+      if (id && id==w->gui_press)
+	WebWinAction(slot,id);
+      w->gui_press=0;
     }
     if (msg==MSG_KEY_DOWN) {
       if (arg1==CH_ESC || arg1==CH_SHIFT_ESC)
 	break;
-      DocPutKey(DocPut,arg1,arg2);
+      if (w->gui) {
+	if (arg1=='\t')
+	  w->gui_focus=WebGuiHit(w,0,0,w->gui_focus);
+	kind=0;
+	switch (arg2.u8[0]) {
+	  case SC_CURSOR_UP: kind=1; break;
+	  case SC_CURSOR_DOWN: kind=2; break;
+	  case SC_PAGE_UP: kind=3; break;
+	  case SC_PAGE_DOWN: kind=4; break;
+	  case SC_HOME: kind=5; break;
+	  case SC_END: kind=6;
+	}
+	if (kind && (scroll=WebGuiHit(w,0,0,0,5)))
+	  WebWinAction(slot,0x100000+scroll*16+kind);
+	if (arg1=='\n' || arg1==CH_SPACE)
+	  if (w->gui_focus)
+	    WebWinAction(slot,w->gui_focus);
+      } else
+	DocPutKey(DocPut,arg1,arg2);
     }
+    if (!msg)
+      Sleep(10);
   }
 }
 

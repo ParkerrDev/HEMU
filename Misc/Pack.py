@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import mmap
+import os
 from pathlib import Path
 import re
 import shutil
@@ -51,10 +52,10 @@ def Pack(base,one,four,out):
                     patch=b"".join(struct.pack("<I",i//512)+new[i:i+512] for i in range(0,len(old),512) if old[i:i+512]!=new[i:i+512])
             (out/overlay).write_bytes(patch)
             shutil.copyfile(folder/"registers.txt",out/registers)
-            subprocess.run(["node",str(Path(__file__).with_name("RegsMk.mjs")),str(out/registers),str(out/"Kernel"/("SnapRegsSmp.HC" if cores==4 else "SnapRegs.HC"))],check=True)
+            subprocess.run(["node",str(Path(__file__).resolve().parent.parent/"holyc-wasm/Apps/HEMU/Misc/RegsMk.mjs"),str(out/registers),str(out/"Kernel"/("SnapRegsSmp.HC" if cores==4 else "SnapRegs.HC"))],check=True,env=dict(os.environ,HEMU_ROOT=str(Path(__file__).resolve().parent.parent)))
             record={"cores":cores,"ram":ram,"ramBytes":402653184,"packedBytes":len(packed),"ramSha256":Hash(folder/"live.bin"),
                 "gzipSha256":Hash(out/ram),"registers":registers,"registerSha256":Hash(out/registers),
-                "sourceSha256":Hash(out/"Kernel"/("SnapRegsSmp.HC" if cores==4 else "SnapRegs.HC")),"parserSha256":Hash(Path(__file__).with_name("Regs.mjs")),"overlay":overlay,"overlayBytes":len(patch),
+                "sourceSha256":Hash(out/"Kernel"/("SnapRegsSmp.HC" if cores==4 else "SnapRegs.HC")),"parserSha256":Hash(Path(__file__).resolve().parent.parent/"holyc-wasm/Apps/HEMU/Misc/Regs.mjs"),"overlay":overlay,"overlayBytes":len(patch),
                 "overlaySha256":Hash(out/overlay),"diskSha256":Hash(folder/"disk.raw"),"evidence":evidence}
             meta["captures"].append(record)
         (out/"stock.json").write_text(json.dumps(meta,indent=2)+"\n")

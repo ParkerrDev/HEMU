@@ -7,12 +7,11 @@ a Welcome card and the OS's Take Tour question. It does not execute the DVD's
 
 - `Linux/`: on x86-64 Linux, KVM runs TempleOS on the host processor. A C host
   supplies the rest of the PC and a Wayland window. See [Linux](#linux).
-- `Kernel/`: a HolyC x86-64 CPU/device emulator with a JavaScript browser host,
-  workers and x86-to-WASM block JIT.
-  [HolyC-wasm](https://github.com/ParkerrDev/HolyC-wasm) compiles the emulator;
-  HEMU pins that compiler in `Siblings.txt` and mounts it at `holyc-wasm/`.
+- `Kernel/`: a HolyC x86-64 CPU/device emulator and x86-to-WASM block JIT.
+  [HolyC-wasm](https://github.com/ParkerrDev/HolyC-wasm) owns the compiler and browser host, workers,
+  build and integration tests. HEMU pins that checkout in `Siblings.txt` and mounts it at `holyc-wasm/`.
   [TempleOS-Web](https://github.com/ParkerrDev/TempleOS-Web) and HEMU's standalone
-  desktop use this runtime. HEMU owns its build, tests and capture recipes.
+  desktop use this runtime. HEMU owns the core sources and capture recipes.
 
 The small `Boot.HC` framebuffer kernel is an instruction and device fixture, not a TempleOS cold-boot
 test. The HolyC test adapter that runs under original V5.03 is headless.
@@ -39,8 +38,8 @@ test. The HolyC test adapter that runs under original V5.03 is headless.
 | `capture.txt`, `capture-smp.txt` | original stopped native CPU register dumps, including FPU/XMM state |
 | `live.bin.gz`, `live-smp.bin.gz` | lossless sparse RAM captures: gzipped nonzero 64-byte ranges reconstructing 384 MiB |
 | `templeos-hd.qcow2.gz` | immutable base disk for both captures; `stock.json` binds its hashes and each overlay |
-| `Kernel/*.js`, `Kernel/Test/`, `Kernel/Desktop/` | browser runtime, machine tests and standalone desktop; see [Kernel](../Kernel/README.md) |
-| `Kernel/Build.mjs`, `Misc/Server.mjs`, `Siblings.txt` | engine build, standalone server and compiler pin |
+| `holyc-wasm/Apps/HEMU/` | external WebAssembly host, integration tests and standalone browser desktop |
+| `holyc-wasm/Apps/HEMU/Kernel/Build.mjs`, `Misc/Serve.sh`, `Siblings.txt` | engine build, standalone server and compiler pin |
 | `Misc/Capture/`, `Misc/Pack.py`, `Misc/Ram.py` | native preparation/capture, packaging and sparse RAM format |
 | `Linux/HEMU.CPP`, `Linux/make_hemu` | the KVM machine and the script that builds and installs it |
 
@@ -159,22 +158,22 @@ time; `Frame` pulls input, runs the instruction budget the host asked for, and p
 
 ## Building and running
 
-`Kernel/Compile.js` compiles `Kernel/Snapshot.HC` in strict mode, making the
+`holyc-wasm/Apps/HEMU/Kernel/Compile.js` compiles `Kernel/Snapshot.HC` in strict mode, making the
 `Host.HC` declarations WebAssembly imports and exporting the functions the host
-calls. `Kernel/Host.js` implements that contract using HolyC-wasm's `createHost()`;
-`Kernel/JitCore.HC` supplies the x86-to-WASM compiler; `Kernel/Jit.js` installs
+calls. `holyc-wasm/Apps/HEMU/Kernel/Host.js` implements that contract using HolyC-wasm's `createHost()`;
+`Kernel/JitCore.HC` supplies the x86-to-WASM compiler; `holyc-wasm/Apps/HEMU/Kernel/Jit.js` installs
 its output through the browser WebAssembly API. From this repository, with the pinned
 compiler at `holyc-wasm/`:
 
 ```sh
-node Kernel/Build.mjs                         # build/hemu*.wasm and SMP metadata
-node Kernel/Test/Measure.mjs                  # self-checking instruction battery
-node Kernel/Test/BootTest.mjs                 # demo kernel framebuffer
+sh Misc/Build.sh                         # build/hemu*.wasm and SMP metadata
+node holyc-wasm/Apps/HEMU/Kernel/Test/Measure.mjs                  # self-checking instruction battery
+node holyc-wasm/Apps/HEMU/Kernel/Test/BootTest.mjs                 # demo kernel framebuffer
 ```
 
-See [Kernel/README.md](../Kernel/README.md) for compiler setup, the standalone
-browser window, complete machine checks and startup/storage behavior. Tests
-live with HEMU; website shell and catalog integration tests stay with the site.
+See [the browser host](https://github.com/ParkerrDev/HolyC-wasm/blob/master/Apps/HEMU/README.md)
+for compiler setup, the standalone browser window, machine checks and storage.
+Host tests live in HolyC-wasm; website shell and catalog tests stay with the site.
 
 ## Backend guest execution
 
@@ -184,7 +183,7 @@ the current task's stack, the callee runs with IF=0, and when it returns to the 
 interrupted CPU state is restored bit-exactly. The callee's side effects on guest memory persist; nothing
 else does. This is the discipline TempleOS itself uses for IRQ1, so the JobQue family (TaskExe, JobResScan,
 PopUp) is safe by construction. Only core 0 injects; a callee that faults or exceeds its budget is reported
-as failed and the interrupted state is still restored. `Kernel/GuestExec.js` is the host-side
+as failed and the interrupted state is still restored. `holyc-wasm/Apps/HEMU/Kernel/GuestExec.js` is the host-side
 API over it (`exec`, `include`, `mkdir`, `writeFile`, `launch`).
 
 ## Devices and performance
@@ -236,7 +235,7 @@ the VGA planes through that same alias, at alias+0xA0000. Decoding by page
 offset alone once made pixel stores at offset 0x300 send IPIs whose vector
 was pixel data; an exception vector crashed an AP, and the BSP, left in
 single-user mode, ran only the window manager. Those stores are now ignored
-(`Kernel/Test/MmioAlias.test.mjs`).
+(`holyc-wasm/Apps/HEMU/Kernel/Test/MmioAlias.test.mjs`).
 
 `Kernel/Atom.HC` owns memory read/modify/write operations, including implicit-lock
 XCHG, LOCK arithmetic, unary operations, XADD, CMPXCHG/8B/16B and bit changes.
@@ -324,12 +323,12 @@ game playthroughs.
 The RAM images are captured from TempleOS booted under QEMU with the machine paused, together with the
 register state that becomes `Kernel/SnapRegs*.HC`; the two must match, so re-bake the registers after every
 capture. HEMU owns the disk, RAM, registers, overlays and their `stock.json`
-manifest. `Misc/Regs.mjs` parses the captured registers, and the same generator
+manifest. `holyc-wasm/Apps/HEMU/Misc/Regs.mjs` parses the captured registers, and the same generator
 handles either CPU count:
 
 ```sh
-node Misc/RegsMk.mjs capture.txt
-node Misc/RegsMk.mjs capture-smp.txt
+node holyc-wasm/Apps/HEMU/Misc/RegsMk.mjs capture.txt
+node holyc-wasm/Apps/HEMU/Misc/RegsMk.mjs capture-smp.txt
 ```
 
 `Misc/Pack.py` packages verified native captures with their base disk and
@@ -341,7 +340,7 @@ question, ready for a visitor's answer. Display corrections are compiled before
 capture rather than installed while the browser loads.
 
 The RAM payload stores adjacent nonzero 64-byte blocks as sparse ranges before
-gzip compression. `Misc/Ram.py` packs or expands it; `Kernel/Ram.js` validates and
+gzip compression. `Misc/Ram.py` packs or expands it; `holyc-wasm/Apps/HEMU/Kernel/Ram.js` validates and
 restores it in the browser. Zero-filled guest memory supplies omitted ranges.
 The native Linux installer expands the same capture into its flat RAM file.
 
@@ -349,4 +348,4 @@ The web host can also save and restore a complete live machine. Its versioned
 container includes the exact compiled engine, every core and device's state,
 guest memory, host input/settings, and the full current disk. SnapshotResume
 reconnects the host JIT and displays the saved frame without resetting the CPU.
-See [Kernel/Test/README.md](../Kernel/Test/README.md#full-machine-snapshots) for the format and round-trip tests.
+See [host tests](https://github.com/ParkerrDev/HolyC-wasm/blob/master/Apps/HEMU/Kernel/Test/README.md#full-machine-snapshots) for the format and round-trip tests.

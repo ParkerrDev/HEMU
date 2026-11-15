@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-node Kernel/Test/Chk.mjs "$@"
+export HEMU_ROOT="$PWD"
+exec node holyc-wasm/Apps/HEMU/Kernel/Test/Chk.mjs "$@"

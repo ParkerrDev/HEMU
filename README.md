@@ -4,7 +4,7 @@
 
 # HEMU
 
-**A TempleOS machine for the browser and Linux.** Resume the V5.03 desktop through a HolyC x86-64 emulator or a native KVM host.
+**A TempleOS machine for the browser and Linux.** The emulator is HolyC; HolyC-wasm owns its browser host. Resume the V5.03 desktop through a HolyC x86-64 emulator or a native KVM host.
 
 **[Try it in TempleOS-Web →](https://templeosweb.netlify.app/)**
 
@@ -15,18 +15,18 @@
 
 <br>
 
-With Node.js and npm installed, run from this checkout:
+With Node.js 22.19 or later, run from this checkout:
 
 ```sh
 while read dir url sha; do git clone -q "$url" "$dir" && git -C "$dir" checkout -q "$sha"; done <Siblings.txt
-npm install
-node Kernel/Build.mjs
-node Misc/Server.mjs
+npm install --prefix holyc-wasm/Apps/HEMU
+sh Misc/Build.sh
+sh Misc/Serve.sh
 ```
 
 Open the local URL printed by the server. This standalone desktop uses the same engine as TempleOS-Web, with automatic C: storage in the browser.
 
-[Browser runtime](Kernel/README.md)
+[Browser runtime](https://github.com/ParkerrDev/HolyC-wasm/blob/master/Apps/HEMU/README.md)
 
 </details>
 
@@ -58,7 +58,7 @@ This **builds and installs** HEMU under `~/.local/share/HEMU`, adds a TempleOS l
 
 The captured desktop already contains the Welcome card, Take Tour question and native display corrections. HEMU restores matching RAM, registers and disk sectors; it does not run the DVD's 16-bit BIOS loader.
 
-The browser engine executes TempleOS machine code with a HolyC CPU/device interpreter and an x86-to-WASM JIT. Fast graphics accelerates selected stock drawing routines by default. Disable it to execute their original guest instructions; both modes keep the instruction-level JIT. It implements the hardware and instructions used by the supported TempleOS workloads, not a general PC.
+The browser engine executes TempleOS machine code with a HolyC CPU/device interpreter and an x86-to-WASM JIT. Web Optimization accelerates selected stock drawing routines by default. Disable it to execute their original guest instructions; both modes keep the instruction-level JIT. It implements the hardware and instructions used by the supported TempleOS workloads, not a general PC.
 
 [Architecture and supported behavior](Doc/Guide.md) · [Capture recipe](Misc/Capture/README.md)
 
@@ -72,10 +72,10 @@ The browser engine executes TempleOS machine code with a HolyC CPU/device interp
 <br>
 
 ```sh
-node Kernel/Test/Chk.mjs
+sh Misc/Test.sh
 ```
 
-[Checks and coverage](Kernel/Test/README.md) · [Host interface](Kernel/Host.HC) · [HolyC-wasm compiler](https://github.com/ParkerrDev/HolyC-wasm)
+[Checks and coverage](https://github.com/ParkerrDev/HolyC-wasm/blob/master/Apps/HEMU/Kernel/Test/README.md) · [Host interface](Kernel/Host.HC) · [HolyC-wasm compiler](https://github.com/ParkerrDev/HolyC-wasm)
 
 TempleOS, HolyC, the sword-and-scales artwork and the 8×8 system font were created by **Terry A. Davis**. TempleOS is public domain. The banner uses its font and artwork.
 

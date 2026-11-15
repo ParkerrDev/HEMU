@@ -2,6 +2,7 @@ import argparse
 import base64
 import gzip
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -28,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix="fpu-proof-") as temp:
     with gzip.open(args.disk,"rb") as src,(temp/"disk").open("wb") as dst:shutil.copyfileobj(src,dst)
     image=work/"disk.raw"
     subprocess.run(["qemu-img","convert","-O","raw",str(temp/"disk"),str(image)],check=True)
-    subprocess.run(["node",str(here/"Inject.mjs"),str(image),str(work/"Probe.HC")],check=True)
+    subprocess.run(["node",str(here.parent.parent/"holyc-wasm/Apps/HEMU/Misc/Capture/Inject.mjs"),str(image),str(work/"Probe.HC")],check=True,env=dict(os.environ,HEMU_ROOT=str(here.parent.parent)))
     sock=temp/"qmp.sock";log=work/"debug.log"
     cmd=["qemu-system-x86_64","-accel","kvm","-cpu","host","-m","384M","-smp","1",
         "-drive",f"file={image},format=raw,if=ide,index=0","-vga","std","-display","none",

@@ -4,6 +4,7 @@ import collections
 import gzip
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -12,7 +13,8 @@ import subprocess
 import tempfile
 import time
 
-HEMU_MISC=Path(__file__).resolve().parent.parent
+HEMU_ROOT=Path(__file__).resolve().parent.parent.parent
+HEMU_MISC=HEMU_ROOT/"holyc-wasm/Apps/HEMU/Misc"
 
 class Qmp:
     def __init__(self, path):
@@ -98,7 +100,7 @@ def Main(default_cores=1):
             shutil.copyfile(disk,decoded)
         subprocess.run(["qemu-img","convert","-O","raw",str(decoded),str(image)],check=True)
         initial_disk=Hash(image)
-        prepared=json.loads(subprocess.check_output(["node",str(Path(__file__).with_name("Prepare.mjs")),str(image)],text=True))
+        prepared=json.loads(subprocess.check_output(["node",str(HEMU_MISC/"Capture/Prepare.mjs"),str(image)],text=True,env=dict(os.environ,HEMU_ROOT=str(HEMU_ROOT))))
         font=base64.b64decode(re.search(r'const B64 = "([^"]+)"',args.font.read_text())[1])
         socket_path=temp/"qmp.sock"
         command=["qemu-system-x86_64","-machine","pc","-accel",args.accel,
@@ -148,7 +150,7 @@ def Main(default_cores=1):
                 Wait(Quiescent,"all CPUs halted with empty x87 stacks")
                 # The same strict parser used by publication must accept this stopped state.
                 script=HEMU_MISC/"RegsMk.mjs"
-                subprocess.run(["node",str(script),str(work/"registers.txt"),str(work/"SnapRegs.HC")],check=True)
+                subprocess.run(["node",str(script),str(work/"registers.txt"),str(work/"SnapRegs.HC")],check=True,env=dict(os.environ,HEMU_ROOT=str(HEMU_ROOT)))
                 if qmp.command("query-status")["status"]!="paused":raise RuntimeError("Capture resumed unexpectedly")
                 qmp.monitor(f'pmemsave 0 0x18000000 "{work / "live.bin"}"')
                 if (work/"live.bin").stat().st_size!=402653184:raise RuntimeError("Incomplete RAM capture")
