@@ -8,10 +8,13 @@ export async function DiskStoreOpen(Notice,readOnly=false,wait=false)
     if (!globalThis.indexedDB || !globalThis.navigator?.locks)
       throw Error("Browser storage is unavailable.");
     if (!readOnly) await new Promise(function (Resolve,Reject) {
-      navigator.locks.request("templeos-C",wait?{signal:AbortSignal.timeout(15000)}:{ifAvailable:true},function (lock) {
+      navigator.locks.request("templeos-C",wait?{signal:AbortSignal.timeout(3000)}:{ifAvailable:true},function (lock) {
         write=!!lock;Resolve();
         if (lock) return new Promise(function () {});
-      }).catch(Reject);
+      }).catch(function (e) {
+        if (wait && e.name=="TimeoutError") Resolve();
+        else Reject(e);
+      });
     });
     db=await new Promise(function (Resolve,Reject) {
       let req=indexedDB.open("templeos-C",1);
@@ -63,12 +66,17 @@ export async function DiskStoreOpen(Notice,readOnly=false,wait=false)
     return pending;
   }
   return {
-    async Load() {
+    async Load(revision=null) {
       let record=await Run("readonly",function (store) {
         let range=IDBKeyRange.bound(0,Number.MAX_SAFE_INTEGER),
-          base=store.get("base"),keys=store.getAllKeys(range),values=store.getAll(range);
-        return function () {return {base:base.result,keys:keys.result,values:values.result};};
+          base=store.get("base"),keys=store.getAllKeys(range),values=store.getAll(range),
+          current=store.get("revision");
+        return function () {return {base:base.result,keys:keys.result,values:values.result,revision:current.result};};
       });
+      if (revision && record.revision!==revision) {
+        let error=Error("Saved C: changed while the session was starting.");
+        error.code="SESSION_STALE";throw error;
+      }
       if (!record.base) return null;
       let disk=await makeDisk(new Uint8Array(await record.base.arrayBuffer()));
       record.keys.forEach(function (key,i) {
@@ -85,7 +93,7 @@ export async function DiskStoreOpen(Notice,readOnly=false,wait=false)
       await Flush();
       if (!write) {
         if (failed) {ErrorShow(failed);return;}
-        Status("error","C: autosave is active in another tab. Changes here are not saved; export a backup.");
+        Status("error","Another TempleOS tab owns C:. Close it and Restart to save here; export a backup to keep unsaved changes.");
         return;
       }
       try {
@@ -127,7 +135,7 @@ export async function DiskStoreOpen(Notice,readOnly=false,wait=false)
         };
       });
       if (!record) return null;
-      return {bytes:await record.bytes.arrayBuffer(),savedAt:record.savedAt};
+      return {bytes:await record.bytes.arrayBuffer(),savedAt:record.savedAt,revision:record.revision};
     },
     async SessionSave(bytes) {
       await Flush();

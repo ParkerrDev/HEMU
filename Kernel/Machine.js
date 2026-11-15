@@ -85,7 +85,7 @@ export function Machine({message,error,earlyWorker=null})
       alive:false,initialized:false,busFailed:false,hostLost:false,watchdog:null};
     message({cmd:"starting",cores});
     const Current=()=>current===generation&&group===g;
-    function Failed(msg,retained=false,coordination=false) {
+    function Failed(msg,retained=false,coordination=false,code=null) {
       if(!Current())return;
       clearTimeout(g.watchdog);
       const started=g.alive;
@@ -95,7 +95,7 @@ export function Machine({message,error,earlyWorker=null})
         if(coordination||g.hostLost)g.capture={ready:false,msg};
         requests.Fail(msg+" Restart TempleOS before running programs or writing files.");
       } else Stop(msg);
-      error({msg,retained,started,cores,busFailed:g.busFailed});
+      error({msg,retained,started,cores,busFailed:g.busFailed,...(code?{code}:{})});
     }
     function HostLost(msg) {
       if(!Current())return;
@@ -106,7 +106,7 @@ export function Machine({message,error,earlyWorker=null})
     function Receive(m) {
       if(!Current())return;
       if(m.cmd==="error") {
-        Failed(m.msg,!!m.retained,!!(g.ctrl&&(Atomics.load(new Int32Array(g.ctrl),1)||!m.retained)));
+        Failed(m.msg,!!m.retained,!!(g.ctrl&&(Atomics.load(new Int32Array(g.ctrl),1)||!m.retained)),m.code);
         return;
       }
       requests.Receive(m);

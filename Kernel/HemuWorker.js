@@ -285,7 +285,7 @@ onmessage = async (e) => {
   if (saving && m.cmd!=="ack") {deferred.push(m);return;}
   if (m.cmd === "init") boot(m).catch(err => {
     if(machineBus)BusStop(new Int32Array(smpCfg.ctrl));
-    postMessage({cmd:"error",msg:String(err?.message||err),...(loaded?{retained:true,paused:true}:{})});
+    postMessage({cmd:"error",msg:String(err?.message||err),code:err?.code,...(loaded?{retained:true,paused:true}:{})});
   });
   else if (m.cmd === "input") { if (m.keys) keyq.Push(m.keys); if (m.keysUp) keyq.Release(); guestInput.accept(m); windows?.Input(m.winSlot,m.winTask,m.winNum); }
   else if (m.cmd==="windows") WindowRequest(m);
@@ -419,7 +419,7 @@ async function SnapInflate(gz,capture)
   postMessage({cmd:"ramReady",ms:Math.round(performance.now()-start)});
   return bytes;
 }
-async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, repeat, rate, fast, resumeDisk=false, diskDelay=2500, sharedSession=false }) {
+async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, repeat, rate, fast, resumeDisk=false, diskDelay=2500, sharedSession=false, sessionRevision=null }) {
   if ([0,30,60,120].includes(rate)) refreshRate=rate;
   if (typeof repeat==="boolean") repeatKeys=repeat;
   if (typeof fast==="boolean") fast_graphics=fast;
@@ -519,8 +519,8 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
   if (saved) {
     if(saved.meta.requiredBusProtocol && !machineBus?.Ready())
       throw new Error("Saved machine requires every core to coordinate RAM access");
+    const restoredDisk=resumeDisk && await diskStore?.Load(sessionRevision);
     disk=await saved.Restore(inst.exports.memory,{busProtocol:smpCfg?.busProtocol||0});
-    const restoredDisk=resumeDisk && await diskStore?.Load();
     if(restoredDisk)disk=restoredDisk;
     await diskStore?.Attach(disk,!!restoredDisk);
     const m=saved.meta;
