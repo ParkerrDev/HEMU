@@ -13,7 +13,7 @@ import * as jit from "../Jit.js";
 import { createGuestExec } from "../GuestExec.js";
 import { readFileSync } from "node:fs";
 const RAMSZ = 402653184;
-const liveBuf = SnapshotRead(), disk = DiskRead();
+const liveBuf = SnapshotRead(), disk = await DiskRead();
 const r = compileHemu();
 const mod = await WebAssembly.compile(r.bytes);
 let gBase = 0, inst; const ovl = disk.overlay; const badops = [];

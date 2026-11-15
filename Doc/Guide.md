@@ -162,7 +162,8 @@ time; `Frame` pulls input, runs the instruction budget the host asked for, and p
 `Kernel/Compile.js` compiles `Kernel/Snapshot.HC` in strict mode, making the
 `Host.HC` declarations WebAssembly imports and exporting the functions the host
 calls. `Kernel/Host.js` implements that contract using HolyC-wasm's `createHost()`;
-`Kernel/Jit.js` supplies the optional JIT. From this repository, with the pinned
+`Kernel/JitCore.HC` supplies the x86-to-WASM compiler; `Kernel/Jit.js` installs
+its output through the browser WebAssembly API. From this repository, with the pinned
 compiler at `holyc-wasm/`:
 
 ```sh

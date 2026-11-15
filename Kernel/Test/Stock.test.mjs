@@ -32,7 +32,7 @@ const root=resolve(HEMU_SRC,".."),manifest=StockManifestCheck(JSON.parse(readFil
   hash=b=>createHash("sha256").update(b).digest("hex"),
   base=readFileSync(resolve(HEMU_SRC,"../templeos-hd.qcow2.gz"));
 assert.equal(hash(base),manifest.base.gzipSha256);
-const decoded=gunzipSync(base),baseDisk=makeDisk(decoded),chunk=new Uint8Array(131072),baseHash=createHash("sha256");
+const decoded=gunzipSync(base),baseDisk=await makeDisk(decoded),chunk=new Uint8Array(131072),baseHash=createHash("sha256");
 for(let off=0;off<baseDisk.virtualSize;off+=chunk.length){baseDisk.readInto(off/512,chunk.length/512,chunk,0);baseHash.update(chunk);}
 assert.equal(baseHash.digest("hex"),manifest.base.rawSha256);
 for(const capture of manifest.captures) {
@@ -50,7 +50,7 @@ for(const capture of manifest.captures) {
   await assert.rejects(()=>StockIdentify(gz,capture.cores===1?4:1,manifest),/topology/);
   const patch=readFileSync(resolve(root,capture.overlay));
   assert.equal(hash(patch),capture.overlaySha256);
-  const disk=makeDisk(decoded),bad=Buffer.from(patch);
+  const disk=await makeDisk(decoded),bad=Buffer.from(patch);
   bad.writeUInt32LE(0xFFFFFFFF,0);
   assert.throws(()=>StockOverlayApply(disk,bad,capture),/out-of-range/);
   assert.equal(disk.overlay.size,0,"reject before applying even the first malformed sector");

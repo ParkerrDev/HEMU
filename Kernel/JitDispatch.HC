@@ -1,0 +1,71 @@
+I64 jit_rip_table,jit_count_table,jit_fast,jit_gate;
+
+U0 JitDispatchBuild(CWasmBuf *f,Bool render)
+{
+  I64 type=0;
+  if (render) type=1;
+  f->cnt=0;f->overflow=FALSE;
+  WasmI32(f,0);WasmArg(f,W_LOCAL_SET,1);
+  WasmArg(f,W_LOCAL_GET,0);WasmI32(f,31);WasmByte(f,W_I32_SHR_U);
+  WasmArg(f,W_LOCAL_SET,6);
+  WasmArg(f,W_LOCAL_GET,0);WasmI32(f,31);WasmByte(f,W_I32_SHR_S);
+  WasmArg(f,W_LOCAL_SET,5);
+  WasmArg(f,W_LOCAL_GET,0);WasmArg(f,W_LOCAL_GET,5);
+  WasmByte(f,W_I32_XOR);WasmArg(f,W_LOCAL_GET,5);
+  WasmByte(f,W_I32_SUB);WasmArg(f,W_LOCAL_SET,5);
+  WasmArg(f,W_LOOP,0x40);
+  if (render) {
+    WasmI32(f,jit_fast);WasmMem(f,W_I32_LOAD8_U,0,0);
+    WasmI32(f,jit_gate);WasmI32(f,jit_rip_addr);
+    WasmMem(f,W_I32_LOAD,0,2);WasmI32(f,65535);
+    WasmByte(f,W_I32_AND);WasmByte(f,W_I32_ADD);
+    WasmMem(f,W_I32_LOAD8_U,0,0);WasmByte(f,W_I32_AND);
+    WasmArg(f,W_LOCAL_GET,1);WasmArg(f,W_LOCAL_GET,5);
+    WasmByte(f,W_I32_LT_S);WasmByte(f,W_I32_AND);WasmIf(f);
+      WasmArg(f,W_CALL,0);WasmI64(f,0);WasmByte(f,W_I64_NE);
+      WasmIf(f);
+	WasmArg(f,W_LOCAL_GET,1);WasmI32(f,1);
+	WasmByte(f,W_I32_ADD);WasmArg(f,W_LOCAL_SET,1);
+	WasmArg(f,W_BR,2);
+      WasmByte(f,W_END);
+    WasmByte(f,W_END);
+  }
+  WasmI32(f,jit_rip_addr);WasmMem(f,W_I32_LOAD,0,2);
+  WasmArg(f,W_LOCAL_SET,2);
+  WasmArg(f,W_LOCAL_GET,2);WasmArg(f,W_LOCAL_GET,2);
+  WasmI32(f,16);WasmByte(f,W_I32_SHR_U);WasmByte(f,W_I32_XOR);
+  WasmI32(f,0xFFFF);WasmByte(f,W_I32_AND);WasmArg(f,W_LOCAL_SET,3);
+  WasmI32(f,jit_rip_table);WasmArg(f,W_LOCAL_GET,3);WasmI32(f,8);
+  WasmByte(f,W_I32_MUL);WasmByte(f,W_I32_ADD);
+  WasmMem(f,W_I32_LOAD,0,2);WasmArg(f,W_LOCAL_GET,2);
+  WasmByte(f,W_I32_EQ);
+  WasmI32(f,jit_count_table);WasmArg(f,W_LOCAL_GET,3);WasmI32(f,8);
+  WasmByte(f,W_I32_MUL);WasmByte(f,W_I32_ADD);
+  WasmMem(f,W_I32_LOAD,0,2);WasmI32(f,0);WasmByte(f,W_I32_GT_S);
+  WasmByte(f,W_I32_AND);
+  WasmArg(f,W_LOCAL_GET,1);WasmArg(f,W_LOCAL_GET,5);
+  WasmByte(f,W_I32_LT_S);WasmByte(f,W_I32_AND);WasmIf(f);
+    WasmArg(f,W_LOCAL_GET,5);WasmArg(f,W_LOCAL_GET,1);
+    WasmByte(f,W_I32_SUB);WasmByte(f,W_I64_EXTEND_I32_U);
+    WasmArg(f,W_GLOBAL_SET,0);
+    WasmI32(f,jit_count_table);WasmArg(f,W_LOCAL_GET,3);WasmI32(f,8);
+    WasmByte(f,W_I32_MUL);WasmByte(f,W_I32_ADD);WasmLd64(f);
+    WasmArg(f,W_GLOBAL_GET,0);WasmByte(f,W_I64_GT_U);WasmIf(f);
+      WasmArg(f,W_LOCAL_GET,1);WasmByte(f,W_RETURN);
+    WasmByte(f,W_END);
+    WasmArg(f,W_LOCAL_GET,3);WasmArg(f,W_CALL_INDIRECT,type);
+    WasmByte(f,0);WasmArg(f,W_LOCAL_SET,4);
+    WasmArg(f,W_LOCAL_GET,1);WasmArg(f,W_LOCAL_GET,4);
+    WasmI32(f,0x3FFFFFFF);WasmByte(f,W_I32_AND);
+    WasmByte(f,W_I32_ADD);WasmArg(f,W_LOCAL_SET,1);
+    WasmArg(f,W_LOCAL_GET,4);WasmI32(f,0x3FFFFFFF);
+    WasmByte(f,W_I32_AND);WasmI32(f,0);WasmByte(f,W_I32_NE);
+    WasmArg(f,W_LOCAL_GET,6);WasmArg(f,W_LOCAL_GET,4);
+    WasmI32(f,30);WasmByte(f,W_I32_SHR_U);
+    WasmI32(f,1);WasmByte(f,W_I32_AND);WasmByte(f,W_I32_AND);
+    WasmByte(f,W_I32_EQZ);WasmByte(f,W_I32_AND);
+    WasmArg(f,W_BR_IF,1);WasmArg(f,W_LOCAL_GET,1);
+    WasmByte(f,W_RETURN);
+  WasmByte(f,W_END);WasmByte(f,W_END);WasmArg(f,W_LOCAL_GET,1);
+  JitModule(f,TRUE,render);
+}

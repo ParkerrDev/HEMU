@@ -116,4 +116,20 @@ new DataView(grown.buffer).setBigUint64(apRip,BigInt(PC),true);
 new Uint8Array(grown.buffer)[fast]=1;new Uint8Array(grown.buffer)[gate+(PC&65535)]=1;
 assert.equal(ap.jitDispatch(1),1,'A private dispatch refreshes its mode/gate view after memory growth.');
 count++;
+for (const shared of [false,true]) {
+  const current=Owner(shared),data=new Uint8Array(current.memory.buffer),
+    view=current.view;
+  data.set([0x48,0xFF,0xC0,0xF4],BASE+PC);
+  Attach(current);jit.jitChain(tables,counts);
+  assert.equal(jit.jitCompile(PC),1);
+  view.setBigInt64(tables+slot*8,BigInt(PC),true);
+  view.setBigInt64(counts+slot*8,1n,true);
+  const before=data.slice();
+  jit.jitReset();
+  assert.equal(jit.jitDispatch(1),0,'Reset cannot call a cleared native table slot.');
+  assert.deepEqual(data,before,'Reset discards compiled code without writing guest memory.');
+  assert.equal(jit.jitCompile(PC),1);assert.equal(jit.jitDispatch(1),1);
+  assert.equal(view.getBigInt64(REG,true),1n);
+  count++;
+}
 console.log(`${count} JIT ownership cases preserve memory, private AP caches, live modes and optional CPU bindings.`);

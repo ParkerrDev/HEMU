@@ -9,7 +9,7 @@ import {SnapshotRead,DiskRead} from "./Fixtures.mjs";
 export async function GuestHarness(opt={})
 {//A deterministic guest for native API checks, sharing the production engine.
   const compiled=compileHemu(opt),live=SnapshotRead(),
-        disk=opt.disk?DiskRead():null,badops=[],keys=KeyQueue();
+        disk=opt.disk?await DiskRead():null,badops=[],keys=KeyQueue();
   assert.deepEqual(compiled.warnings,[]);
   let base=0,inst,gx,ns=16000000;
   const host=createHemuHost({

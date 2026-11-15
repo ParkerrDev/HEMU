@@ -22,7 +22,7 @@ export async function LegacySnapshot({guestPatches=[],paused=true}={})
   const {instance}=await WebAssembly.instantiate(wasm,{env:host.env});host.attach(instance);
   instance.exports.__rt_init();instance.exports.__main();
   assert.ok(base>0);assert.equal(instance.exports.RamBase(),BigInt(base));
-  const disk=makeDisk(gunzipSync(diskGz));
+  const disk=await makeDisk(gunzipSync(diskGz));
   return SnapshotSave({wasm,memory,disk,meta:{cores:4,base,heapAbi:meta.heapAbi,
     heapPtr:host.state.heapPtr,sp:Number(instance.exports.__sp.value),ipiAddr:meta.globals.g_ipi_pending,
     paused,rate:30,actualRate:30,repeat:false,budget:12000000,launch:null,guestPatches,

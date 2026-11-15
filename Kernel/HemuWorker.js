@@ -8,7 +8,7 @@ import {KeyQueue} from "./KeyQueue.js";
 import {CaptureBarrier} from "./CoreBarrier.js";
 import {CoreBus,BusStop,BUS_VERSION} from "./CoreBus.js";
 import { createHemuHost,CpuFaultText } from "./Host.js";
-import { makeDisk, fat32Upload, fat32List } from "./QCow2.js";
+import { makeDisk, fat32List } from "./QCow2.js";
 import * as jit from "./Jit.js";             // x86-64 -> WASM block JIT (the speed: interp ~6fps -> JIT 30-65fps games)
 import {createGuestInput} from "./GuestInput.js";
 import { createGuestExec } from "./GuestExec.js";   // backend guest execution: jobs queued through the OS's own TaskExe, no keystrokes
@@ -300,7 +300,7 @@ onmessage = async (e) => {
   else if (m.cmd === "importDisk") {
     const wasPaused=paused;
     try {
-      const next=makeDisk(new Uint8Array(m.bytes));
+      const next=await makeDisk(new Uint8Array(m.bytes));
       PauseSet(true);
       GuestCacheInvalidate();
       diskGeneration++;
@@ -311,15 +311,6 @@ onmessage = async (e) => {
     } catch(err) {
       postMessage({cmd:"diskInfo",ok:false,diskReady:!!disk,diskPending,msg:String(err.message||err)});
     } finally {PauseSet(wasPaused);}
-  }
-  else if (m.cmd === "uploadFile") {
-    try { if (!disk) throw new Error("disk not loaded yet - wait a moment after boot");
-      const before = new Set(disk.overlay.keys());                       // which sectors are already overlaid
-      const r = fat32Upload(disk, m.name, new Uint8Array(m.bytes), m.dir || "Home");
-      const changed = []; for (const k of disk.overlay.keys()) if (!before.has(k)) changed.push(k);   // sectors this write touched
-      const cleared = GuestCacheInvalidate(changed);			 // refresh ONLY those in the guest cache
-      postMessage({ cmd: "fileResult", id: m.id, ok: true, msg: `wrote ${m.name} to /${m.dir || "Home"} (${r.clusters} clusters; ${changed.length} sectors, ${cleared} cached refreshed)` });
-    } catch (err) { postMessage({ cmd: "fileResult", id: m.id, ok: false, msg: String(err.message || err) }); }
   }
   else if (m.cmd === "listDir") {
     try {
@@ -406,7 +397,7 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
   diskStore=await DiskStoreOpen(postMessage);
   gz=null;
   if (!saved && diskBytes) {
-    disk=makeDisk(new Uint8Array(diskBytes));
+    disk=await makeDisk(new Uint8Array(diskBytes));
     await diskStore?.Attach(disk);
   }
   const mod=await compiled;

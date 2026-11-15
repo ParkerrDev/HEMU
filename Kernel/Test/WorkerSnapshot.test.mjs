@@ -42,7 +42,7 @@ for (const smp of [0,4]) {
     assert.ok(palette.every(v=>v!==null),"boot publishes every displayed palette entry");
     const diskSave=await Request(h,{cmd:"exportDisk"},m=>m.cmd==="exportResult",60000);
     assert.equal(diskSave.ok,true,diskSave.msg);
-    const exported=makeDisk(gunzipSync(diskSave.buf));
+    const exported=await makeDisk(gunzipSync(diskSave.buf));
     assert.equal(new TextDecoder().decode(fat32Read(exported,"Home","SnapshotCheck.TXT")),"complete machine disk\n");
     const diskAfter=await Request(h,{cmd:"__peek",ranges},m=>m.cmd==="__peek");
     assert.deepEqual(diskAfter.ranges,before.ranges,"disk export freezes every core and device too");

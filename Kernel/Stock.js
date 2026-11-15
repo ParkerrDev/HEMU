@@ -130,9 +130,9 @@ export async function StockDiskFiles(capture,manifest)
   return {raw:await StockInflate(base,manifest.base.decodedBytes),patch};
 }
 
-export function StockDiskMake({raw,patch},capture,manifest)
+export async function StockDiskMake({raw,patch},capture,manifest)
 {
-  const disk=makeDisk(raw);
+  const disk=await makeDisk(raw);
   if(disk.virtualSize!==manifest.base.virtualBytes)Fail("base disk dimensions");
   return StockOverlayApply(disk,patch,capture);
 }

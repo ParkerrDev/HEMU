@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {fileURLToPath} from "node:url";
 import {execFileSync} from "node:child_process";
 import { compileHemu } from "./Compile.js";
+import {DiskBuild} from "./DiskBuild.mjs";
 import {STOCK_SECTION} from "./Stock.js";
 function StockRequired(bytes) {
   if(WebAssembly.Module.customSections(new WebAssembly.Module(bytes),STOCK_SECTION).length!==1)
@@ -12,7 +13,12 @@ function StockRequired(bytes) {
 const out = resolve(process.argv[2] || "build");
 execFileSync(process.execPath,[fileURLToPath(new URL(
   "../holyc-wasm/Misc/RuntimeMk.mjs",import.meta.url)),"--check"],{stdio:"inherit"});
+execFileSync(process.execPath,[fileURLToPath(new URL(
+  "../holyc-wasm/Misc/HeapMk.mjs",import.meta.url)),"--check"],{stdio:"inherit"});
+execFileSync(process.execPath,[fileURLToPath(new URL(
+  "./JitBuild.mjs",import.meta.url)),"--check"],{stdio:"inherit"});
 mkdirSync(out, { recursive: true });
+DiskBuild(out);
 
 const r = compileHemu();
 StockRequired(r.bytes);

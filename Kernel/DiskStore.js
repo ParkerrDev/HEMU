@@ -68,7 +68,7 @@ export async function DiskStoreOpen(Notice)
         return function () {return {base:base.result,keys:keys.result,values:values.result};};
       });
       if (!record.base) return null;
-      let disk=makeDisk(new Uint8Array(await record.base.arrayBuffer()));
+      let disk=await makeDisk(new Uint8Array(await record.base.arrayBuffer()));
       record.keys.forEach(function (key,i) {
         if (typeof key=="number") {
           let bytes=record.values[i];

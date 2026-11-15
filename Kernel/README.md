@@ -10,14 +10,16 @@ windows and controls. HEMU's standalone `Desktop/` uses the same runtime.
 | File | What |
 |---|---|
 | `Compile.js` | `compileHemu()`: strict compilation of HEMU with the exports the host calls |
-| `Build.mjs` | writes `hemu.wasm`, `hemu-smp.wasm` and the SMP mailbox metadata to `build/` |
+| `Build.mjs` | writes both engines, SMP metadata and lazy `disk.wasm`; checks generated HolyC modules |
 | `Host.js` | `createHemuHost()`: HolyC-wasm's `createHost()` plus the imports declared in `Host.HC` |
 | `Render.HC` | optional fast graphics with complete stock-code guards; `RenderFastSet` selects original drawing instructions |
-| `Jit.js` | compiles guest instructions into WASM blocks; registers stay in locals, flags are lazy, and a WASM dispatcher chains blocks |
+| `JitCore.HC`, `Jit*.HC` | decode x86 instructions and emit WASM blocks with cached registers, deferred flags and native dispatch |
+| `Jit.js`, `JitCode.js` | attach CPU memory, install generated modules and manage browser function tables; `JitCode.js` contains compiled HolyC bytes |
 | `GuestExec.js` | resolves guest symbols and exposes queued execution, inclusion, file writing and task launches over `GuestCall.HC` |
 | `GuestInput.js`, `KeyQueue.js` | guest mouse metadata, relative motion and IRQ1 keyboard delivery |
 | `GuestWin.HC`, `GuestWindows.js` | optional native document surfaces, task identities and browser tool actions |
-| `QCow2.js`, `DiskStore.js` | sector I/O, FAT32 file access and IndexedDB C: persistence |
+| `Disk.HC`, `DiskHost.HC` | qcow2 and FAT32 algorithms, shared by browser storage and offline capture tools |
+| `QCow2.js`, `DiskStore.js` | lazy disk-module loading, sector buffers and IndexedDB C: persistence |
 | `Stock.js`, `Ram.js` | captured CPU/RAM/disk identity and sparse RAM reconstruction |
 | `StockDiskWorker.js` | background stock disk download, validation and inflation |
 | `Machine.js` | shared worker startup, request lifetimes, cancellation, fault handling and restart for the site and standalone desktop |
@@ -156,6 +158,15 @@ Full `.hemu` saves embed their exact engine, RAM, disk, CPU/device state and
 host settings. They resume their saved windows and code. Historical correction
 metadata is validated when those saves load; this is separate from stock
 startup. See [the saved-machine format](Test/README.md#full-machine-snapshots).
+
+The JIT generator has its own small WASM memory. It accepts guest instruction
+bytes and CPU addresses, then returns a compiled block. Disk-format code also
+uses separate memory. Neither helper enlarges guest RAM or saved snapshots, and
+both can serve older embedded engines. Disk code loads only when a disk is needed.
+
+After changing JIT HolyC, run `node Kernel/JitBuild.mjs`. Normal builds reject
+stale generated JIT and allocator bytes. `JitNative.mjs` compares the generated
+modules with the same source compiled by the original TempleOS compiler.
 
 `Jit.js` learns CPU-state addresses through `__jit_state` and `__jit_seg`, rather
 than hard-coded structure offsets. The host, JIT, compiler runtime and engine

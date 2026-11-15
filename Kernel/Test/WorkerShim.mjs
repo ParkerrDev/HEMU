@@ -138,6 +138,7 @@ function MainTimed()
 async function Instantiate(mod,imports)
 {//Keeps the instance and the guest's base so the probe can read the guest.
   let env=imports.env,snap_load=env.__snap_load,seg=env.__jit_seg,ns=env.__host_ns,res;
+  if(!snap_load)return wasm_instantiate.call(WebAssembly,mod,imports);
   function SnapLoad(base)
   {
     g_base=Number(base);

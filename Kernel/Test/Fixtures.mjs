@@ -34,14 +34,14 @@ export function SnapshotRead(smp=false)
   return file.gzip?RamExpand(gunzipSync(raw)):raw;
 }
 
-export function DiskRead(smp=false)
+export async function DiskRead(smp=false)
 {//Each test has its own sector overlay; the bundled disk stays untouched.
   const file=DiskFile(),raw=readFileSync(file.path),stock=Stock(smp);
-  if(!stock||process.env.RAW)return makeDisk(file.gzip?gunzipSync(raw):raw);
+  if(!stock||process.env.RAW)return await makeDisk(file.gzip?gunzipSync(raw):raw);
   const {manifest,capture}=stock,patch=readFileSync(resolve(HEMU_SRC,"..",capture.overlay));
   if(Hash(raw)!==manifest.base.gzipSha256||Hash(patch)!==capture.overlaySha256)
     throw Error("Stock disk fixture checksum");
-  return StockOverlayApply(makeDisk(gunzipSync(raw)),patch,capture);
+  return StockOverlayApply(await makeDisk(gunzipSync(raw)),patch,capture);
 }
 
 export function FixtureInputs(smp=false)

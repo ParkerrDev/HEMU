@@ -1,7 +1,8 @@
+import {makeSparse,DISK_CHUNK} from "./QCow2.js";
 import {BusModuleVersion} from "./CoreBus.js";
 import {GUEST_PATCHES} from "./GuestPatch.js";
 
-const MAGIC=new TextEncoder().encode("HEMUSNP1"),PAGE=65536,CHUNK=131072;
+const MAGIC=new TextEncoder().encode("HEMUSNP1"),PAGE=65536,CHUNK=DISK_CHUNK;
 const Fail=msg=>{throw new Error("Invalid HEMU snapshot: "+msg);};
 const Int=(n,min,max)=>Number.isSafeInteger(n)&&n>=min&&n<=max;
 const Hash=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)),v=>v.toString(16).padStart(2,"0")).join("");
@@ -93,24 +94,13 @@ export async function SnapshotOpen(gz,{busProtocol=0,reader=Reader}={})
       memory.grow((meta.memoryBytes-memory.buffer.byteLength)/PAGE);
       await rd.Take(meta.memoryBytes,new Uint8Array(memory.buffer));
       // Sparse disk chunks retain the complete image without allocating its empty sectors.
-      const chunks=new Map(),overlay=new Map(),buf=new Uint8Array(CHUNK);
+      const chunks=new Map(),buf=new Uint8Array(CHUNK);
       for (let off=0;off<meta.diskBytes;off+=CHUNK) {
         const n=Math.min(CHUNK,meta.diskBytes-off),data=await rd.Take(n,buf.subarray(0,n));
         if (!Zero(data)) chunks.set(off/CHUNK,data.slice());
       }
       await rd.End();
-      return {virtualSize:meta.diskBytes,overlay,
-        readInto(lba,count,dst,at) {
-          for (let i=0;i<count;i++) {
-            const offset=(lba+i)*512,buf=overlay.get(lba+i)||chunks.get(Math.floor(offset/CHUNK));
-            const from=overlay.has(lba+i)?0:offset%CHUNK;
-            if (buf) dst.set(buf.subarray(from,from+512),at+i*512);
-            else dst.fill(0,at+i*512,at+(i+1)*512);
-          }
-        },
-        writeInto(lba,count,src,at) {
-          for (let i=0;i<count;i++) overlay.set(lba+i,src.slice(at+i*512,at+(i+1)*512));
-        }};
+      return makeSparse(meta.diskBytes,chunks);
     }};
   } catch (err) {await rd.Close();throw err;}
 }

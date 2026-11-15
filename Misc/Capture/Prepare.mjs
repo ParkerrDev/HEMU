@@ -67,7 +67,7 @@ function Archive(bytes)
   return out;
 }
 
-let disk=makeDisk(readFileSync(image)),records=JSON.parse(Read("Original/Sources.json"));
+let disk=await makeDisk(readFileSync(image)),records=JSON.parse(Read("Original/Sources.json"));
 for (let record of records) {
   let encoded=fat32Read(disk,record.dir,record.name),
     original=Read("Original/"+record.name.slice(0,-2)),source=original.toString("latin1");
