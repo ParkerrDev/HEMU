@@ -9,7 +9,6 @@ import "../holyc-wasm/src/runtime/console.js";
 import "../holyc-wasm/src/runtime/files.js";
 import "../holyc-wasm/src/runtime/heap.js";
 import "../holyc-wasm/src/abi.js";
-import "../holyc-wasm/src/wasm/emitter.js";
 
 onmessage=e=>{
   if(e.data.cmd!=="init")return;

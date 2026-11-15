@@ -86,6 +86,7 @@ export function Machine({message,error,earlyWorker=null})
       retained=retained||started;
       if(retained) {
         if(coordination&&g.ctrl){g.busFailed=true;BusStop(new Int32Array(g.ctrl));}
+        if(coordination||g.hostLost)g.capture={ready:false,msg};
         requests.Fail(msg+" Restart TempleOS before running programs or writing files.");
       } else Stop(msg);
       error({msg,retained,started,cores,busFailed:g.busFailed});
@@ -103,6 +104,7 @@ export function Machine({message,error,earlyWorker=null})
         return;
       }
       requests.Receive(m);
+      if(m.cmd==="captureState"&&!g.hostLost&&!g.busFailed)g.capture=m;
       if(m.cmd==="frame") {
         g.alive=true;clearTimeout(g.watchdog);
         g.bsp.postMessage({cmd:"ack"});
@@ -168,6 +170,7 @@ export function Machine({message,error,earlyWorker=null})
     return Start(next,true);
   }
   return {Warm,Start,Restart,Stop,post:Post,Request:requests.Request,
+    get capture(){return group?.capture||{ready:false,msg:"Wait for TempleOS and C: to finish loading."};},
     get kind(){return group?(group.cores===4?"smp":"worker"):null;},
     get busFailed(){return !!group?.busFailed;}};
 }

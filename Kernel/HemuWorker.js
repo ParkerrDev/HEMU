@@ -22,7 +22,6 @@ import "../holyc-wasm/src/runtime/console.js";
 import "../holyc-wasm/src/runtime/files.js";
 import "../holyc-wasm/src/runtime/heap.js";
 import "../holyc-wasm/src/abi.js";
-import "../holyc-wasm/src/wasm/emitter.js";
 
 const keyq=KeyQueue();
 let repeatKeys=false,refreshRate=0,actualRate=null,fast_graphics=true,actual_fast=null;
@@ -66,6 +65,18 @@ let machineBus=null,diskPending=false,diskGeneration=0,stockCapture=null,stockMa
 const RamAccess=fn=>machineBus?machineBus.Access(fn):fn();
 const deferred=[];
 let guestPatches=[];
+let captureMsg;
+function CaptureState()
+{
+  const msg=!loaded || !disk || !gx?.ready?"Wait for TempleOS and C: to finish loading.":
+    smpCfg && !apsReleased?(paused?"Resume TempleOS to finish startup before exporting.":
+      "Finishing startup before export…"):"";
+  if (msg!==captureMsg) {
+    captureMsg=msg;
+    postMessage({cmd:"captureState",ready:!msg,msg});
+  }
+  return msg;
+}
 function PauseSet(value) {
   if (instRef?.exports.WinSurfaceActive?.()) {
     paused=true;
@@ -85,6 +96,7 @@ function PauseSet(value) {
   if (paused) {keyq.Release();showStoppedFrame?.();}
   else machineBarrier?.Unlock();
   postMessage({cmd:"paused",value:paused});
+  CaptureState();
 }
 const NOJIT = /[?&]nojit/.test(self.location ? self.location.search : "");   // ?nojit -> pure interpreter (debug/fallback)
 // JIT segment/TSC addresses now flow from the guest at runtime via __jit_seg (per-core CCpuState) - no hardcoded offsets to drift.
@@ -261,6 +273,7 @@ function gxTick() {                          // once per emulated frame: service
     try { gxProbe = gx.probe(); } catch (e) { gxProbe = { ok: false, errors: [String(e && e.message || e)], warnings: [] }; }
     if (gxProbe.ok) { console.log("[hemu] guest execution API ready: " + JSON.stringify({ syms: gxProbe.syms, focusFn: gxProbe.focusFn, warnings: gxProbe.warnings, tasks: gxProbe.tasks.map((t) => t.name + (t.atPrompt ? "(prompt)" : "")) })); postMessage({ cmd: "guestReady", ok: true, probe: gxProbe, diskReady:!!disk,diskPending }); }
     else { console.warn("[hemu] guest probe " + gxProbeTries + ": " + gxProbe.errors.join("; ")); if (gxProbeTries === 40) postMessage({ cmd: "guestReady", ok: false, probe: gxProbe }); }
+    CaptureState();
   }
   try { gx.tick(); } catch (e) { console.warn("[hemu] guest tick threw", e); }
 }
@@ -326,7 +339,8 @@ onmessage = async (e) => {
 async function exportImage(kind) {
   let locked=false,frozen=false;
   try {
-    if (!loaded || !disk || !gx?.ready) throw new Error("Wait for the machine and disk to finish loading.");
+    const why=CaptureState();
+    if (why) throw new Error(why);
     if (instRef.exports.WinSurfaceActive?.())
       throw new Error("The window renderer stopped mid-frame. Restart before saving.");
     if (machineBarrier && !machineBarrier.Lock()) throw new Error("The application cores did not stop; save again.");
@@ -517,6 +531,7 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
       actual_fast=!!inst.exports.RenderFastSet(BigInt(fast_graphics));
   }
   if (saved) postMessage({cmd:"restored",cores:saved.meta.cores,paused});
+  CaptureState();
   postMessage({cmd:"progress",text:"starting TempleOS…",pct:100});
 
   // Fast yield via MessageChannel: drains input/ack messages between iterations without the
@@ -563,6 +578,7 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
       for (let k = 1; k < smpCfg.ncore; k++) dvm.setBigUint64(smpCfg.ipiAddr + k * 8, 0n, true);   // drop stale boot-IPIs
       const c = new Int32Array(smpCfg.ctrl); Atomics.store(c, 0, 1); Atomics.notify(c, 0);          // CTRL.READY = 1
       apsReleased = true; postMessage({ cmd: "smpReady", ncore: smpCfg.ncore });
+      CaptureState();
     }
     if (!loaded) { loaded = true; SettingsApply(); snap = snapWrote = null;                     // snapshot now in WASM RAM - free the 384 MB copy
       // Load the C: disk AFTER boot settles (file I/O works once it lands; the desktop runs from
@@ -588,6 +604,7 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
             diskPending=false;
             postMessage({cmd:"diskInfo",ok:false,diskReady:!!disk,diskPending,msg:err.message});
           }
+          CaptureState();
         },diskDelay);
       }
       // guest execution API: bound to this instance now that gBase is known (snapLoad ran in the first frame)

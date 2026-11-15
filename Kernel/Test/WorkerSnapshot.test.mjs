@@ -21,8 +21,22 @@ for (const smp of [0,4]) {
   try {
     assert.equal((await ReadyWait(h,20000)).ok,true);
     assert.equal(h.msgs.filter(m=>m.cmd==="settings").at(-1).fast,false);
+    if (smp) {
+      await Request(h,{cmd:"pause",value:true},m=>m.cmd==="paused"&&m.value);
+      assert.ok(!h.msgs.some(m=>m.cmd==="smpReady"),"pause occurs before AP release");
+    }
     if (!h.msgs.some(m=>m.cmd==="diskInfo"&&m.ok)) await h.Wait(m=>m.cmd==="diskInfo"&&m.ok,30000);
-    if (smp && !h.msgs.some(m=>m.cmd==="smpReady")) await h.Wait(m=>m.cmd==="smpReady",10000);
+    if (smp) {
+      for (const cmd of ["exportSnapshot","exportDisk"]) {
+        const early=await Request(h,{cmd},m=>m.cmd==="exportResult");
+        assert.equal(early.ok,false);
+        assert.match(early.msg,/Resume TempleOS to finish startup/);
+      }
+      assert.equal(h.msgs.filter(m=>m.cmd==="captureState").at(-1).ready,false);
+      await Request(h,{cmd:"pause",value:false},m=>m.cmd==="paused"&&!m.value);
+    }
+    if (!h.msgs.some(m=>m.cmd==="captureState"&&m.ready))
+      await h.Wait(m=>m.cmd==="captureState"&&m.ready,20000);
     const write=await Result(h,{cmd:"osWrite",id:"write",path:"C:/Home/SnapshotCheck.TXT",bytes:new TextEncoder().encode("complete machine disk\n")});
     assert.equal(write.ok,true,write.msg);
     const launch=await Result(h,{cmd:"osLaunch",id:"game",name:"Snapshot loop",src:'while (TRUE) {Refresh;Sleep(10);}'});
@@ -61,6 +75,8 @@ for (const smp of [0,4]) {
     assert.equal(head.meta.fast,false);
     h=await HemuBoot({snapshot:saved.buf,busProtocol,fast:true,keep_buf:true});
     await h.Wait(m=>m.cmd==="restored",30000);
+    if (!h.msgs.some(m=>m.cmd==="captureState"&&m.ready))
+      await h.Wait(m=>m.cmd==="captureState"&&m.ready,5000);
     assert.equal(h.msgs.filter(m=>m.cmd==="settings").at(-1).fast,false,
       "a full save retains its actual graphics mode");
     assert.ok(h.msgs.some(m=>m.cmd==="guestReady"&&m.restored&&m.diskReady&&!m.diskPending));

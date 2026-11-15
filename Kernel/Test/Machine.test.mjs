@@ -32,6 +32,7 @@ try {
   machine.post({cmd:"set",repeat:true});
   held=null;release();
   await starting;
+  assert.equal(machine.capture.ready,false);
   let bsp=workers.at(-1);
   assert.equal(bsp.sent[0].fast,false,"Settings changed while fetching apply before the first frame.");
   assert.equal(bsp.sent[0].rate,60);
@@ -48,7 +49,10 @@ try {
   assert.equal(bsp.sent[0].rate,120);
 
   bsp.Receive({cmd:"frame",buf:new ArrayBuffer(0)});
+  assert.equal(machine.capture.ready,false,"A desktop frame alone cannot enable export.");
+  bsp.Receive({cmd:"captureState",ready:true,msg:""});
   bsp.Receive({cmd:"error",msg:"CPU 0 stopped",retained:true});
+  assert.equal(machine.capture.ready,true,"A retained CPU fault still permits backup.");
   assert.equal(errors.at(-1).retained,true);assert.ok(!bsp.stopped);
   assert.match((await machine.Request({cmd:"osExec",src:""})).msg,/CPU 0 stopped/);
   const failedFlush=machine.Restart(boot),flush=bsp.sent.at(-1);
@@ -59,12 +63,15 @@ try {
 
   const saved={meta:{cores:4,ipiAddr:64},wasm:new Uint8Array([0])};
   await machine.Start({...boot,cores:4,saved});
+  assert.equal(machine.capture.ready,false,"A replacement machine must establish its own readiness.");
   const group=workers.filter(w=>!w.stopped);assert.equal(group.length,4);
   bsp=group.find(w=>w.url.endsWith("/HemuWorker.js"));
   const init=bsp.sent[0],ctrl=new Int32Array(init.smp.ctrl);
   assert.equal(init.resumeDisk,false,"Explicit import replaces C: from its saved machine.");
   bsp.Receive({cmd:"frame",buf:new ArrayBuffer(0)});
   group.find(w=>w!==bsp).onerror({message:"AP lost"});
+  bsp.Receive({cmd:"captureState",ready:true,msg:""});
+  assert.equal(machine.capture.ready,false,"A queued readiness message cannot revive a failed bus.");
   assert.equal(Atomics.load(ctrl,1),1);
   machine.post({cmd:"exportSnapshot"});
   assert.equal(events.at(-1).ok,false);assert.match(events.at(-1).msg,/coordination failed/);
