@@ -59,8 +59,13 @@ export function Machine({message,error,earlyWorker=null})
       }
       return;
     }
+    if ((group.hostLost || group.busFailed) && m.cmd==="saveSession") {
+      const result={cmd:"fileResult",id:m.id,ok:false,
+        msg:"This stopped machine cannot be saved. Restart TempleOS."};
+      requests.Receive(result);message(result);return;
+    }
     if((group.hostLost||group.busFailed)&&["exportSnapshot","exportDisk"].includes(m.cmd)) {
-      message({cmd:"exportResult",kind:m.cmd==="exportSnapshot"?"snapshot":"disk",ok:false,
+      message({cmd:"exportResult",id:m.id,kind:m.cmd==="exportSnapshot"?"snapshot":"disk",ok:false,
         msg:group.hostLost?"The main worker was lost. This machine cannot be exported; restart TempleOS.":
           "Shared RAM coordination failed. This stopped machine cannot be exported; restart TempleOS."});
       return;
@@ -78,6 +83,7 @@ export function Machine({message,error,earlyWorker=null})
     else {generation++;earlyWorker?.terminate();earlyWorker=null;}
     const current=generation,g=group={cores,bsp:s?.bsp||null,aps:s?.aps||[],ctrl:null,
       alive:false,initialized:false,busFailed:false,hostLost:false,watchdog:null};
+    message({cmd:"starting",cores});
     const Current=()=>current===generation&&group===g;
     function Failed(msg,retained=false,coordination=false) {
       if(!Current())return;

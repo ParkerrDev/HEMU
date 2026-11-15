@@ -1,14 +1,14 @@
 import {makeDisk} from "./QCow2.js";
 
-export async function DiskStoreOpen(Notice)
+export async function DiskStoreOpen(Notice,readOnly=false,wait=false)
 {//One writer per browser profile; disk sectors commit together after each guest turn.
   let db,write=false,dirty=new Map(),queued=false,active=0,pending=Promise.resolve(),failed=null;
   function Status(state,msg) {Notice({cmd:"diskSave",state,msg});}
   try {
     if (!globalThis.indexedDB || !globalThis.navigator?.locks)
       throw Error("Browser storage is unavailable.");
-    await new Promise(function (Resolve,Reject) {
-      navigator.locks.request("templeos-C",{ifAvailable:true},function (lock) {
+    if (!readOnly) await new Promise(function (Resolve,Reject) {
+      navigator.locks.request("templeos-C",wait?{signal:AbortSignal.timeout(15000)}:{ifAvailable:true},function (lock) {
         write=!!lock;Resolve();
         if (lock) return new Promise(function () {});
       }).catch(Reject);
@@ -49,6 +49,7 @@ export async function DiskStoreOpen(Notice)
       if (failed) throw failed;
       return Run("readwrite",function (store) {
         for (let [lba,bytes] of batch) store.put(bytes,lba);
+        store.put(crypto.randomUUID(),"revision");
       });
     }).then(function () {
       failed=null;
@@ -64,7 +65,8 @@ export async function DiskStoreOpen(Notice)
   return {
     async Load() {
       let record=await Run("readonly",function (store) {
-        let base=store.get("base"),keys=store.getAllKeys(),values=store.getAll();
+        let range=IDBKeyRange.bound(0,Number.MAX_SAFE_INTEGER),
+          base=store.get("base"),keys=store.getAllKeys(range),values=store.getAll(range);
         return function () {return {base:base.result,keys:keys.result,values:values.result};};
       });
       if (!record.base) return null;
@@ -97,6 +99,7 @@ export async function DiskStoreOpen(Notice)
           let base=new Blob(parts);
           await Run("readwrite",function (store) {
             store.clear();store.put(base,"base");
+            store.put(crypto.randomUUID(),"revision");
             for (let [lba,bytes] of disk.overlay) store.put(bytes,lba);
           });
         }
@@ -113,6 +116,34 @@ export async function DiskStoreOpen(Notice)
     async Flush() {
       await Flush();
       if (failed) throw failed;
+    },
+    async SessionRead() {
+      let record=await Run("readonly",function (store) {
+        let session=store.get("session"),revision=store.get("revision");
+        return function () {
+          if (session.result?.revision===revision.result)
+            return session.result;
+          return null;
+        };
+      });
+      if (!record) return null;
+      return {bytes:await record.bytes.arrayBuffer(),savedAt:record.savedAt};
+    },
+    async SessionSave(bytes) {
+      await Flush();
+      if (!write || failed)
+        throw failed || Error("This tab does not own browser storage.");
+      let savedAt=Date.now(),blob=new Blob([bytes]);
+      await Run("readwrite",function (store) {
+        let revision=store.get("revision");
+        revision.onsuccess=function () {
+          store.put({revision:revision.result,bytes:blob,savedAt},"session");
+        };
+      });
+      return savedAt;
+    },
+    Close() {
+      db.close();
     }
   };
 }

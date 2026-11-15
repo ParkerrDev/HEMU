@@ -8,7 +8,7 @@ import {KeyQueue} from "./KeyQueue.js";
 import {CaptureBarrier} from "./CoreBarrier.js";
 import {CoreBus,BusStop,BUS_VERSION} from "./CoreBus.js";
 import { createHemuHost,CpuFaultText } from "./Host.js";
-import { makeDisk, fat32List } from "./QCow2.js";
+import { makeDisk, fat32List, fat32Read } from "./QCow2.js";
 import * as jit from "./Jit.js";             // x86-64 -> WASM block JIT (the speed: interp ~6fps -> JIT 30-65fps games)
 import {createGuestInput} from "./GuestInput.js";
 import { createGuestExec } from "./GuestExec.js";   // backend guest execution: jobs queued through the OS's own TaskExe, no keystrokes
@@ -52,14 +52,14 @@ function SettingsApply(rateChanged=true)
   } catch (error) {
     ok=false;msg=error.message;
   } finally {
-    if (locked && !paused) machineBarrier.Unlock();
+    if (locked && !paused && !suspended) machineBarrier.Unlock();
   }
   postMessage({cmd:"settings",ok,rate:actualRate,repeat:repeatKeys,
     fast:actual_fast,msg});
 }
 let curBudget = 1500000, dtMs = 16, dtNs = 16000000;         // guest instr/frame + real wall-clock ms/frame
 let outstanding = 0, snap = null, snapWrote = null, loaded = false, disk = null, gBase = 0, instRef = null;
-let paused=false,saving=false,machineBarrier=null,engineBytes=null,hostRef=null,showStoppedFrame=null;
+let paused=false,suspended=false,saving=false,machineBarrier=null,engineBytes=null,hostRef=null,showStoppedFrame=null;
 let diskStore=null;
 let machineBus=null,diskPending=false,diskGeneration=0,stockCapture=null,stockManifest=null;
 const RamAccess=fn=>machineBus?machineBus.Access(fn):fn();
@@ -94,7 +94,7 @@ function PauseSet(value) {
     throw new Error("The application cores did not stop; pause again.");
   paused=!!value;
   if (paused) {keyq.Release();showStoppedFrame?.();}
-  else machineBarrier?.Unlock();
+  else if (!suspended) machineBarrier?.Unlock();
   postMessage({cmd:"paused",value:paused});
   CaptureState();
 }
@@ -304,8 +304,18 @@ onmessage = async (e) => {
   else if (m.cmd === "guest") { try { guestCmd(m); } catch (err) { postMessage({ cmd: "guestResult", id: m.id, op: m.op, state: "error", ok: false, msg: String(err?.message || err) }); } }
   else if (m.cmd === "ack") outstanding--;   // main finished a frame - release a flow-control slot
   else if (m.cmd === "pause") {try {PauseSet(m.value);} catch(err) {postMessage({cmd:"error",msg:err.message});}}
-  else if (m.cmd === "exportSnapshot") exportImage("snapshot");
-  else if (m.cmd === "exportDisk") exportImage("disk");
+  else if (m.cmd === "exportSnapshot") exportImage("snapshot",m);
+  else if (m.cmd === "exportDisk") exportImage("disk",m);
+  else if (m.cmd === "saveSession") exportImage("session",m);
+  else if (m.cmd === "suspend") {
+    try {
+      if (m.value && machineBarrier && !machineBarrier.Lock())
+        throw Error("The application cores did not stop.");
+      suspended=!!m.value;
+      if (suspended) keyq.Release();
+      else if (!paused) machineBarrier?.Unlock();
+    } catch (err) {postMessage({cmd:"sessionSave",state:"error",msg:err.message});}
+  }
   else if (m.cmd === "flushDisk") {
     try {PauseSet(true);await diskStore?.Flush();fileResult(m.id,{ok:true});}
     catch(err) {fileResult(m.id,{ok:false,msg:err.message});}
@@ -325,10 +335,19 @@ onmessage = async (e) => {
       postMessage({cmd:"diskInfo",ok:false,diskReady:!!disk,diskPending,msg:String(err.message||err)});
     } finally {PauseSet(wasPaused);}
   }
+  else if (m.cmd === "readFile") {
+    try {
+      if (!disk) throw Error("The TempleOS disk is not available.");
+      let path=String(m.path).replace(/^C:/i,"").replace(/^\/+/,""),
+        i=path.lastIndexOf("/"),bytes=fat32Read(disk,i<0?"":path.slice(0,i),path.slice(i+1));
+      if (!bytes) throw Error("File not found: "+m.path);
+      postMessage({cmd:"fileResult",id:m.id,ok:true,bytes:bytes.buffer},[bytes.buffer]);
+    } catch (err) {fileResult(m.id,{ok:false,msg:err.message});}
+  }
   else if (m.cmd === "listDir") {
     try {
       if(!disk)throw new Error("The TempleOS disk is not available.");
-      const files=fat32List(disk,m.dir||"Home").map(e=>({name:e.name,size:e.size,dir:!!(e.attr&0x10)}));
+      const files=fat32List(disk,(m.dir??"Home").replace(/^C:/i,"").replace(/^\/+/,"")).map(e=>({name:e.name,size:e.size,dir:!!(e.attr&0x10)}));
       postMessage({cmd:"dirList",id:m.id,ok:true,dir:m.dir,files});
     } catch(err) {
       postMessage({cmd:"dirList",id:m.id,ok:false,msg:String(err.message||err)});
@@ -336,7 +355,7 @@ onmessage = async (e) => {
   }
 };
 
-async function exportImage(kind) {
+async function exportImage(kind,request={}) {
   let locked=false,frozen=false;
   try {
     const why=CaptureState();
@@ -345,7 +364,7 @@ async function exportImage(kind) {
       throw new Error("The window renderer stopped mid-frame. Restart before saving.");
     if (machineBarrier && !machineBarrier.Lock()) throw new Error("The application cores did not stop; save again.");
     locked=true;saving=true;
-
+    if (kind==="session") postMessage({cmd:"sessionSave",state:"saving",msg:"Saving session…"});
 
     const launch=gx.snapshot();
     const meta={cores:smpCfg?.ncore||1,base:gBase,heapPtr:hostRef.state.heapPtr,heapAbi:hostRef.state.heapAbi??0,
@@ -355,13 +374,24 @@ async function exportImage(kind) {
       ...(actual_fast===null?{}:{fast:actual_fast}),
       keyboard:keyq.Save(),pointer:guestInput.save(),launch,guestPatches:guestPatches};
     if(machineBus){machineBus.Freeze();frozen=true;}
-    const buf=kind==="snapshot"?await SnapshotSave({meta,wasm:engineBytes,memory:instRef.exports.memory,disk}):await DiskImage();
+    const buf=kind!=="disk"?await SnapshotSave({meta,wasm:engineBytes,memory:instRef.exports.memory,disk}):await DiskImage();
     if(machineBus?.Stopped())throw new Error("Shared RAM coordination stopped during capture");
-    postMessage({cmd:"exportResult",kind,ok:true,buf},[buf]);
-  } catch(err) {postMessage({cmd:"exportResult",kind,ok:false,msg:err.message});}
+    if (kind==="session") {
+      if (!diskStore) throw Error("Browser storage is unavailable. Export a snapshot instead.");
+      const savedAt=await diskStore.SessionSave(buf);
+      if (request.suspend) suspended=true;
+      postMessage({cmd:"sessionSave",state:"saved",savedAt,msg:"Session saved in this browser."});
+      fileResult(request.id,{ok:true},{savedAt});
+    } else postMessage({cmd:"exportResult",id:request.id,kind,ok:true,buf},[buf]);
+  } catch(err) {
+    if (kind==="session") {
+      postMessage({cmd:"sessionSave",state:"error",msg:"Session save failed: "+err.message});
+      fileResult(request.id,{ok:false,msg:err.message});
+    } else postMessage({cmd:"exportResult",id:request.id,kind,ok:false,msg:err.message});
+  }
   finally {
     if(frozen)machineBus.Thaw();
-    if (locked && !paused) machineBarrier?.Unlock();
+    if (locked && !paused && !suspended) machineBarrier?.Unlock();
     saving=false;
     for (const m of deferred.splice(0)) onmessage({data:m});
   }
@@ -389,7 +419,7 @@ async function SnapInflate(gz,capture)
   postMessage({cmd:"ramReady",ms:Math.round(performance.now()-start)});
   return bytes;
 }
-async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, repeat, rate, fast, resumeDisk=false, diskDelay=2500 }) {
+async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, repeat, rate, fast, resumeDisk=false, diskDelay=2500, sharedSession=false }) {
   if ([0,30,60,120].includes(rate)) refreshRate=rate;
   if (typeof repeat==="boolean") repeatKeys=repeat;
   if (typeof fast==="boolean") fast_graphics=fast;
@@ -408,7 +438,7 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
     stockCapture=found.capture;stockManifest=found.manifest;
     snap=found.ram||await SnapInflate(gz,stockCapture);
   }
-  diskStore=await DiskStoreOpen(postMessage);
+  diskStore=await DiskStoreOpen(postMessage,false,sharedSession);
   gz=null;
   if (!saved && diskBytes) {
     disk=await makeDisk(new Uint8Array(diskBytes));
@@ -527,6 +557,7 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
 
   } else {
     inst.exports.__rt_init();
+    postMessage({cmd:"paused",value:false});
     if (inst.exports.RenderFastSet)
       actual_fast=!!inst.exports.RenderFastSet(BigInt(fast_graphics));
   }
@@ -557,7 +588,7 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
     dtNs=Math.min(100000000,Math.floor(dtAcc));
     dtAcc-=dtNs;
     dtMs=dtNs/1000000;
-    if (paused || saving) {
+    if (paused || suspended || saving) {
       await sleep(80);
       lastT=performance.now();
       dtAcc=0;

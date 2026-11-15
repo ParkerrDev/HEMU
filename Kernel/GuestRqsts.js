@@ -32,9 +32,9 @@ export function GuestRequests(post)
     Request(message,transfer=[]) {
       return new Promise(resolve=>{
         const id=next++,request={id,message,transfer,resolve,sent:false,
-          host:message.cmd==='flushDisk'||message.cmd==='windows'&&message.op==='disable',
+          host:message.cmd==='flushDisk'||message.cmd==='saveSession'||message.cmd==='windows'&&message.op==='disable',
           reply:message.cmd==='listDir'?'dirList':'fileResult',
-          disk:message.cmd==='osWrite'||message.cmd==='osInstall'||message.cmd==='listDir'||
+          disk:message.cmd==='osWrite'||message.cmd==='osInstall'||message.cmd==='listDir'||message.cmd==='readFile'||
             message.cmd==='osLaunch'&&message.src===undefined};
         request.timeout=setTimeout(()=>finish(request,{id,ok:false,
           msg:"The OS request timed out. Check the guest before trying again."}),120000);
