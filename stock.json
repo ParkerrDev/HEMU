@@ -12,17 +12,17 @@
       "cores": 1,
       "ram": "live.bin.gz",
       "ramBytes": 402653184,
-      "packedBytes": 37770616,
-      "ramSha256": "13a5623669137edabaf72d7b9154875f2a0725a107f5a0e36ee910e832c87f5f",
-      "gzipSha256": "1dff353072a1faf85bf4f6729d59de65a2cf2ce2eca9b84aa75ec911ee6fd1d4",
+      "packedBytes": 37772552,
+      "ramSha256": "9770d1d61b9f497ffd6043b22593fd92af5ee7a6f1f8eb9921901b57a6f549d7",
+      "gzipSha256": "8205727ce5ebd3c48c2f8e76dbc23c263184f68dcf5ce528ccba28ae06ebfad9",
       "registers": "capture.txt",
-      "registerSha256": "7a99dfd660fca92a177a9c9c7deb5801bbc07743369066df352c9053f0adcce7",
-      "sourceSha256": "3bb14a64c002220df312d060d70722d3edb3605f61a09d36971a24f81337bbb7",
+      "registerSha256": "dd03700ac460da7cdf19349d0ccf5e4603f722f077f43d6df18b6af87a22ae81",
+      "sourceSha256": "132b7fb486a28ef0b33a98585c6cf020184ae302ddbd54b85973e887c96fdfc8",
       "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
       "overlay": "stock.disk",
       "overlayBytes": 84108,
-      "overlaySha256": "c7d3a2c416248f071d00bc3f34589eca3ffb5bbdd6190593cb0d27a1171a1eab",
-      "diskSha256": "7116c60e067124f38bcccd529b159f0aea60cccdc0107b06af362e942e71eb7e",
+      "overlaySha256": "d31a498440b852158c3a3070e86c233d9f2e7fc3981511f16e0ef4c049601df2",
+      "diskSha256": "852e8df321832ee182d7053a15b7e850863d09e1a6d0a19c6acc12349d7e7f48",
       "evidence": {
         "backend": "QEMU emulator version 11.1.2",
         "accel": "kvm",
@@ -40,14 +40,14 @@
             "Original/ACTask.HC": "531790c0e5d20cf3d17310835675a35d1879abb0b5d16edaffe6e3d29a644422",
             "ACDblBuf.HC": "b7ea083a25730974a3f0073bad84433cd3fd3f1bff40dcdd31d74f9df2261f74",
             "Original/HomeSys.HC": "0ceb6445e7425f3f9e5d6e8214cd4b4e5ef1c6c412c4ec82d98f12a5b3cfd5e7",
-            "Welcome.HC": "c187cc780b5b998e2a14bd48c6e798e08ffc7cb5bee4567622272019d11d3cb9",
+            "Welcome.HC": "feef77b49bd11f648363dbc7f9366e027c464d938771420dc79d31fa50d62720",
             "Welcome.DAT": "8d37c17bce4322f1fc179081056f5dd005acad43b42b96b647e768f9a0e8f504",
             "Prepare.mjs": "20665fdee0b562d0fa524ef3551f845ddcc7143cc84cff1334fe26a4861c2413"
           },
           "outputs": {
             "Adam/DolDoc/DocRecalc.HC.Z": "c1bd60fb9a4332627ffcdf1ef6f913fb47c9412f210654ab8ef697b42871bf46",
             "Adam/AutoComplete/ACTask.HC.Z": "858f70e9f952d579b29c3fd5cb495bb0fb38fac8c5ba1eb3ee5bb7dcb71134e2",
-            "/HomeSys.HC.Z": "a4b35056e4a6809e0ffc581cced2da79a945ff79a67142437bf02a05cb98c3bf",
+            "/HomeSys.HC.Z": "1b0744ed769b874dde21cd40c428714cd34f2170bbbe65fa87856fb3dc9af42c",
             "Home/Welcome.DAT": "8d37c17bce4322f1fc179081056f5dd005acad43b42b96b647e768f9a0e8f504"
           },
           "originals": [
@@ -75,23 +75,23 @@
         "files": {
           "live.bin": {
             "bytes": 402653184,
-            "sha256": "13a5623669137edabaf72d7b9154875f2a0725a107f5a0e36ee910e832c87f5f"
+            "sha256": "9770d1d61b9f497ffd6043b22593fd92af5ee7a6f1f8eb9921901b57a6f549d7"
           },
           "disk.raw": {
             "bytes": 268435456,
-            "sha256": "7116c60e067124f38bcccd529b159f0aea60cccdc0107b06af362e942e71eb7e"
+            "sha256": "852e8df321832ee182d7053a15b7e850863d09e1a6d0a19c6acc12349d7e7f48"
           },
           "registers.txt": {
             "bytes": 2121,
-            "sha256": "7a99dfd660fca92a177a9c9c7deb5801bbc07743369066df352c9053f0adcce7"
+            "sha256": "dd03700ac460da7cdf19349d0ccf5e4603f722f077f43d6df18b6af87a22ae81"
           },
           "SnapRegs.HC": {
-            "bytes": 2286,
-            "sha256": "3bb14a64c002220df312d060d70722d3edb3605f61a09d36971a24f81337bbb7"
+            "bytes": 2277,
+            "sha256": "132b7fb486a28ef0b33a98585c6cf020184ae302ddbd54b85973e887c96fdfc8"
           },
           "captured.ppm": {
             "bytes": 921615,
-            "sha256": "e470f412c9262835ec58a44260249729a6afdd964d699987327673e4ec3a7a00"
+            "sha256": "3b5b464268c57d4783570ddff3599fbb9a6f13ff4e1d53d7b3b46e9241ca865b"
           }
         }
       }
@@ -100,17 +100,17 @@
       "cores": 4,
       "ram": "live-smp.bin.gz",
       "ramBytes": 402653184,
-      "packedBytes": 37812584,
-      "ramSha256": "e5a5b080f3c301a7e07ff1ef69ef456aa20da92f853ba29c3a5d599af7316a6d",
-      "gzipSha256": "d0659946054608ca750fffabcc3a6a14f99e5bb673a4e6a7dad0bba5b804300c",
+      "packedBytes": 37891096,
+      "ramSha256": "5db2dcd768fb7bf4c05651c0a76d0be3ddd3062a164d022e6ea27009ef1186d1",
+      "gzipSha256": "0214167ce975890b33b4006310e7ed19204c922a4236c9edd888588290c5c9b7",
       "registers": "capture-smp.txt",
-      "registerSha256": "01416591d17f7878704b3920058236ca4b5ef5eb7e6143bbd41bde0d4bf16808",
-      "sourceSha256": "0963de3fc6b5fb3ff67eae5e3e3505abb5af85d540b0acb2c572b3f301e8acb1",
+      "registerSha256": "c30006f5969d88f6f4663fce38ed32e91accd9500fef362d8fa3dff62021c83a",
+      "sourceSha256": "6a600a67fdfd51c1f26c75c102151a873fee4ed68afd3d4d38e02bb75f612fa6",
       "parserSha256": "f494ec42befff994c89ea262c7af310b583dbbcefcd00d50b84f704fc99d891f",
       "overlay": "stock-smp.disk",
       "overlayBytes": 84108,
-      "overlaySha256": "a2c0b8fb7ace1863be51eb20ea3d62d4fa8b0fd2791b89edb7dade7bc3e727dd",
-      "diskSha256": "908e66d630f25f8946656352e0ccd2920d75a388c4ac93c9522a37ca3ec31f8b",
+      "overlaySha256": "d31a498440b852158c3a3070e86c233d9f2e7fc3981511f16e0ef4c049601df2",
+      "diskSha256": "852e8df321832ee182d7053a15b7e850863d09e1a6d0a19c6acc12349d7e7f48",
       "evidence": {
         "backend": "QEMU emulator version 11.1.2",
         "accel": "kvm",
@@ -128,14 +128,14 @@
             "Original/ACTask.HC": "531790c0e5d20cf3d17310835675a35d1879abb0b5d16edaffe6e3d29a644422",
             "ACDblBuf.HC": "b7ea083a25730974a3f0073bad84433cd3fd3f1bff40dcdd31d74f9df2261f74",
             "Original/HomeSys.HC": "0ceb6445e7425f3f9e5d6e8214cd4b4e5ef1c6c412c4ec82d98f12a5b3cfd5e7",
-            "Welcome.HC": "c187cc780b5b998e2a14bd48c6e798e08ffc7cb5bee4567622272019d11d3cb9",
+            "Welcome.HC": "feef77b49bd11f648363dbc7f9366e027c464d938771420dc79d31fa50d62720",
             "Welcome.DAT": "8d37c17bce4322f1fc179081056f5dd005acad43b42b96b647e768f9a0e8f504",
             "Prepare.mjs": "20665fdee0b562d0fa524ef3551f845ddcc7143cc84cff1334fe26a4861c2413"
           },
           "outputs": {
             "Adam/DolDoc/DocRecalc.HC.Z": "c1bd60fb9a4332627ffcdf1ef6f913fb47c9412f210654ab8ef697b42871bf46",
             "Adam/AutoComplete/ACTask.HC.Z": "858f70e9f952d579b29c3fd5cb495bb0fb38fac8c5ba1eb3ee5bb7dcb71134e2",
-            "/HomeSys.HC.Z": "a4b35056e4a6809e0ffc581cced2da79a945ff79a67142437bf02a05cb98c3bf",
+            "/HomeSys.HC.Z": "1b0744ed769b874dde21cd40c428714cd34f2170bbbe65fa87856fb3dc9af42c",
             "Home/Welcome.DAT": "8d37c17bce4322f1fc179081056f5dd005acad43b42b96b647e768f9a0e8f504"
           },
           "originals": [
@@ -159,27 +159,27 @@
             }
           ]
         },
-        "samples": 2,
+        "samples": 1,
         "files": {
           "live.bin": {
             "bytes": 402653184,
-            "sha256": "e5a5b080f3c301a7e07ff1ef69ef456aa20da92f853ba29c3a5d599af7316a6d"
+            "sha256": "5db2dcd768fb7bf4c05651c0a76d0be3ddd3062a164d022e6ea27009ef1186d1"
           },
           "disk.raw": {
             "bytes": 268435456,
-            "sha256": "908e66d630f25f8946656352e0ccd2920d75a388c4ac93c9522a37ca3ec31f8b"
+            "sha256": "852e8df321832ee182d7053a15b7e850863d09e1a6d0a19c6acc12349d7e7f48"
           },
           "registers.txt": {
             "bytes": 8484,
-            "sha256": "01416591d17f7878704b3920058236ca4b5ef5eb7e6143bbd41bde0d4bf16808"
+            "sha256": "c30006f5969d88f6f4663fce38ed32e91accd9500fef362d8fa3dff62021c83a"
           },
           "SnapRegs.HC": {
-            "bytes": 7332,
-            "sha256": "0963de3fc6b5fb3ff67eae5e3e3505abb5af85d540b0acb2c572b3f301e8acb1"
+            "bytes": 7331,
+            "sha256": "6a600a67fdfd51c1f26c75c102151a873fee4ed68afd3d4d38e02bb75f612fa6"
           },
           "captured.ppm": {
             "bytes": 921615,
-            "sha256": "9ea03e94a73eff1c8259c5a0de42d677e94fbcbfd3993de66ba084c4d3984f9a"
+            "sha256": "c3b60c7846d4de9d04a5458216b73d8690364167d1470f3ca9111e2669221241"
           }
         }
       }

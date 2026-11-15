@@ -18,6 +18,9 @@ U0 Welcome()
 	"$$GREEN$$Tip of day$$FG$$\n";
   TipOfDay;
   "\n$$GREEN$$<SHIFT-ESC>$$FG$$ to exit.\n";
+  LBts(&Fs->display_flags,DISPLAYf_WIN_ON_TOP);
+  WinToTop;
+  LBtr(&Fs->display_flags,DISPLAYf_WIN_ON_TOP);
   View;
 }
 

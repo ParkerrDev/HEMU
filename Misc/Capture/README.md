@@ -28,7 +28,9 @@ compresses their bytes. Native includes prefer .HC.Z, so an uncompressed
 sibling would not replace the original.
 
 Welcome.HC starts an independent native task after the normal HomeSys
-startup. The original terminal still asks Take Tour(y or n)?. Capture waits
+startup and raises it above AutoComplete once, using the native on-top group.
+It then returns to normal window priority so other apps can come forward.
+The original terminal still asks Take Tour(y or n)?. Capture waits
 until both the card and that question have been drawn, then stops all CPUs
 with empty x87 stacks and records RAM, disk and registers. The strict register
 parser also checks the supported CPU topology, flat long mode, interrupt
