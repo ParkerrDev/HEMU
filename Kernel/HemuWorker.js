@@ -31,6 +31,8 @@ function SettingsApply(rateChanged=true)
   const ex=instRef.exports;
   let locked=false,ok=true,msg="";
   try {
+    if (ex.WinSurfaceActive?.())
+      throw new Error("The window renderer stopped mid-frame. Restart before changing settings.");
     if (ex.RenderFastSet && actual_fast!==fast_graphics && machineBarrier) {
       if (!machineBarrier.Lock())
         throw new Error("The other CPUs are busy; try changing graphics mode again.");
@@ -65,6 +67,12 @@ const RamAccess=fn=>machineBus?machineBus.Access(fn):fn();
 const deferred=[];
 let guestPatches=[];
 function PauseSet(value) {
+  if (instRef?.exports.WinSurfaceActive?.()) {
+    paused=true;
+    postMessage({cmd:"paused",value:true});
+    if (!value) postMessage({cmd:"error",msg:"The window renderer stopped mid-frame. Restart TempleOS before resuming.",retained:true,paused:true});
+    return;
+  }
   if(machineBus?.Stopped()) {
     paused=true;
     postMessage({cmd:"paused",value:true});
@@ -149,6 +157,33 @@ function GuestCacheInvalidate(lbas)
 //                                             writeFile|mkdir|popup|info
 // Every request also emits guestResult {id, gid, op, state, msg, ...} progress events (informational).
 let gx = null, gxProbe = null, gxProbeTries = 0, gxFrames = 0, gxSeq = 0;
+let windows=null,windowRevision=0;
+async function WindowRequest(m)
+{
+  try {
+    if (m.op==="disable") windowRevision++;
+    const current=windowRevision;
+    if (!windows && m.op==="disable")
+      return postMessage({cmd:"fileResult",id:m.id,ok:true});
+    const nr=gxNotReady();
+    if (nr) throw Error(nr);
+    if (m.op!=="disable" && !instRef.exports.WinSurfaceActive)
+      throw Error("Restart with the current engine to use window passthrough.");
+    if (!windows) {
+      const {GuestWindows}=await import("./GuestWindows.js");
+      if (current!==windowRevision)
+        throw Error("Window passthrough was turned off.");
+      windows??=GuestWindows({gx,access:RamAccess,paused:()=>paused,
+        post:postMessage,exec:src=>gxRequest("exec",{src,target:"adam"},"windows"),
+        source:async()=>{
+          const r=await fetch(new URL("./GuestWin.HC",import.meta.url));
+          if (!r.ok) throw Error("Could not load the TempleOS window bridge.");
+          return r.text();
+        }});
+    }
+    postMessage({cmd:"fileResult",id:m.id,...await windows.Request(m)});
+  } catch (e) {postMessage({cmd:"fileResult",id:m.id,ok:false,msg:e.message});}
+}
 const gxWaiters = new Map();                 // gx request id -> { siteId, onEv }
 function gxEvent(ev) {
   const w = gxWaiters.get(ev.id);
@@ -239,7 +274,8 @@ onmessage = async (e) => {
     if(machineBus)BusStop(new Int32Array(smpCfg.ctrl));
     postMessage({cmd:"error",msg:String(err?.message||err),...(loaded?{retained:true,paused:true}:{})});
   });
-  else if (m.cmd === "input") { if (m.keys) keyq.Push(m.keys); if (m.keysUp) keyq.Release(); guestInput.accept(m); }
+  else if (m.cmd === "input") { if (m.keys) keyq.Push(m.keys); if (m.keysUp) keyq.Release(); guestInput.accept(m); windows?.Input(m.winSlot,m.winTask,m.winNum); }
+  else if (m.cmd==="windows") WindowRequest(m);
   else if (m.cmd==="keysUp") keyq.Release();
   else if (m.cmd==="set") {
     const rateChanged=[0,30,60,120].includes(m.rate);
@@ -300,6 +336,8 @@ async function exportImage(kind) {
   let locked=false,frozen=false;
   try {
     if (!loaded || !disk || !gx?.ready) throw new Error("Wait for the machine and disk to finish loading.");
+    if (instRef.exports.WinSurfaceActive?.())
+      throw new Error("The window renderer stopped mid-frame. Restart before saving.");
     if (machineBarrier && !machineBarrier.Lock()) throw new Error("The application cores did not stop; save again.");
     locked=true;saving=true;
 
@@ -461,6 +499,8 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
       throw new Error("Saved graphics setting does not match its engine state");
     if (actual_fast!==null) fast_graphics=actual_fast;
     gx=createGuestExec({inst,gBase,onEvent:gxEvent,access:RamAccess});gxProbe=gx.probe();
+    const oldWindows=gx.varFind("web_win_enabled");
+    if (oldWindows) gx.wr64(oldWindows,0);
     if(restoredDisk)GuestCacheInvalidate();
     if (!gxProbe.ok) throw new Error("Saved guest API could not be restored: "+gxProbe.errors.join("; "));
     guestPatches=m.guestPatches;
@@ -567,6 +607,7 @@ async function boot({ gz, wasmUrl, wasmBytes, manifest, fixedB, diskBytes, smp, 
       if (gx && diskBytes) GuestCacheInvalidate();
     }
     gxTick();                                                      // between frames: probe once, then service queued jobs
+    windows?.Tick();
     const work = performance.now() - now;
     if (!fixedB) {                                                 // size budget to fill the frame (games need the MIPS;
       if (work > 15 && curBudget > 900000) curBudget = (curBudget * 0.90) | 0;        // slow machines auto-shrink)

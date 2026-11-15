@@ -332,7 +332,7 @@ U0 Op0F()
 U0 CaptureFrom(U64 bd)
 {//The finished 640x480 frame at bd into g_desk.
   I64 k;
-  if (bd && bd+307200<=mem_size && __capture_lock) {
+  if (!g_win_surface && bd && bd+307200<=mem_size && __capture_lock) {
     for (k=0;k<307200;k++)
       g_desk[k]=mem[bd+k];
     g_desk_ready=1;
@@ -562,6 +562,11 @@ U0 Step()
 U0 RunTo(U64 target,I64 budget)
 {//Interpret until target, a fault, or budget instructions have run.
   I64 lim=icount+budget,poll=0;
+  g_win_run=FALSE;
+  if (g_win_surface) {
+    halted=4;
+    return;
+  }
   while (icount<lim && rip!=target && halted<2) {
     if (!poll) {
       if (g_ncore>1 && !__bus_poll) break;
@@ -647,18 +652,32 @@ I64 RunCore(I64 budget)
 
 U0 Run(I64 maxi)
 {//Core zero runs the devices. Other cores cannot spend its budget.
-  I64 b,batch,cap,slot;
+  I64 b,batch,cap,slot,lim;
   Bool pending;
-  while (icount<maxi && halted<2) {
+  g_win_run=TRUE;
+  while ((icount<maxi || g_win_surface) && halted<2) {
+    lim=maxi;
+    batch=64;
+    if (g_win_surface) {
+      lim=g_win_start+WIN_SURFACE_LIMIT;
+      if (halted || rfl&F_IF || icount>=lim) {
+        halted=4;
+        break;
+      }
+      batch=1;
+    }
     if (g_ncore>1 && !__bus_poll) break;
     pending=PicPending;
     if (pending && rfl&F_IF) {
       halted=0;
       CheckIrq;
     }
-    if (g_gc_state==GC_PENDING && rfl&F_IF)
+    if (g_gc_state==GC_PENDING && rfl&F_IF) {
+      g_win_run=FALSE;
       GuestCallRun;
-    cap=MinI64(maxi-icount,TimeTickWait);
+      g_win_run=TRUE;
+    }
+    cap=MinI64(lim-icount,TimeTickWait);
     if (cap<=0)
       break;
     if (halted==1) {
@@ -670,7 +689,7 @@ U0 Run(I64 maxi)
       if (g_jit_on && !g_capture_gate[rip&0xFFFF]) {
         slot=(rip^(rip>>16))&0xFFFF;
         if (g_jit_rip[slot]==rip && g_jit_n[slot]>0) {
-          if (pending && !(rfl&F_IF))
+          if ((pending || g_win_surface) && !(rfl&F_IF))
             cap=-cap;
           b=__jit_dispatch(cap);
         } else {
@@ -684,11 +703,11 @@ U0 Run(I64 maxi)
         }
       }
       if (!b) {
-        batch=MinI64(64,MinI64(maxi-icount,TimeTickWait));
+        batch=MinI64(batch,MinI64(lim-icount,TimeTickWait));
         while (b<batch) {
           Step;
           b++;
-          if (halted || (pending && rfl&F_IF))
+          if (halted || g_win_surface || (pending && rfl&F_IF))
             break;
           slot=(rip^(rip>>16))&0xFFFF;
           if (g_jit_on && g_jit_rip[slot]==rip && g_jit_n[slot]>0)
@@ -699,6 +718,8 @@ U0 Run(I64 maxi)
       TimeRun(b);
     }
   }
+  if (g_win_surface) halted=4;
+  g_win_run=FALSE;
 }
 
 U0 Reset()

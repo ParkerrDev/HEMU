@@ -10,7 +10,7 @@ export const HEMU_SRC = process.env.HEMU_SRC ? resolve(process.env.HEMU_SRC) : h
 export const JIT_EXPORTS = ["RdMem", "WrMem", "Step", "RenderTry"];
 //What Kernel/GuestExec.js and the workers call: injected guest calls, the
 //guest's names (Sym.HC), and an application core's attach and run.
-export const GUEST_EXPORTS = ["CpuFault", "GuestCallPost", "GuestCallTry", "GuestCallState", "GuestCallRes", "GuestCallAck", "GuestInfo",
+export const GUEST_EXPORTS = ["CpuFault", "WinSurfaceActive", "GuestCallPost", "GuestCallTry", "GuestCallState", "GuestCallRes", "GuestCallAck", "GuestInfo",
   "GuestFun", "GuestArgCnt", "GuestVar", "GuestMember", "RamBase", "CoreAttach", "KbdRptSet", "WinRateSet", "RenderFastSet", "SnapshotResume", "TscRead"];
 export const HEMU_EXPORTS = [...JIT_EXPORTS, ...GUEST_EXPORTS];
 

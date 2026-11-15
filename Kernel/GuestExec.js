@@ -56,6 +56,7 @@ export function createGuestExec(opts) {
   const rd32 = (a) => access(()=>{ views(); return inRam(a) ? dv.getUint32(gBase + a, true) : 0; });
   const rd8 = (a) => access(()=>{ views(); return (a >= 0 && a < memSize) ? u8[gBase + a] : 0; });
   const wr64 = (a, v) => access(()=>{ views(); dv.setBigUint64(gBase + a, BigInt.asUintN(64, BigInt(v)), true); });
+  const wr32 = (a, v) => access(()=>{ views(); dv.setUint32(gBase + a, v, true); });
   const wrBytes = (a, bytes) => access(()=>{ views(); u8.set(bytes, gBase + a); });
   const rdBytes = (a, n) => access(()=>{ views(); return u8.slice(gBase + a, gBase + a + n); });
   const rdStr = (a, max = 96) => { let s = ""; for (let i = 0; i < max; i++) { const c = rd8(a + i); if (!c) break; s += String.fromCharCode(c); } return s; };
@@ -514,5 +515,5 @@ export function createGuestExec(opts) {
   }
   return { snapshot, restoreLaunch, probe: Probe, tick, info, inputState, frameStats, taskInfo, taskRing, exec, include, launch, writeFile, mkdir, popup, call, status: (id) => (reqs.get(id) || {}).last || null,
     funFind: FunFind, varFind: VarFind, memberFind: MemberFind,
-    get ready() { return ready; }, syms: S, vars: G, offsets: { CT, CJ, CJC }, scratch: { base: scrBase, size: scrSize, data: scrBase + SCR.DATA, dataSize, text: scrBase + SCR.TEXT }, rd64, rd8, rdBytes, rdStr, wrBytes, wr64 };
+    get ready() { return ready; }, syms: S, vars: G, offsets: { CT, CJ, CJC }, scratch: { base: scrBase, size: scrSize, data: scrBase + SCR.DATA, dataSize, text: scrBase + SCR.TEXT }, rd64, rd64b, rd32, rd8, rdBytes, rdStr, wrBytes, wr64, wr32 };
 }

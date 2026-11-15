@@ -32,7 +32,7 @@ export function GuestRequests(post)
     Request(message,transfer=[]) {
       return new Promise(resolve=>{
         const id=next++,request={id,message,transfer,resolve,sent:false,
-          host:message.cmd==='flushDisk',
+          host:message.cmd==='flushDisk'||message.cmd==='windows'&&message.op==='disable',
           reply:message.cmd==='listDir'?'dirList':'fileResult',
           disk:message.cmd==='osWrite'||message.cmd==='osInstall'||message.cmd==='listDir'||
             message.cmd==='osLaunch'&&message.src===undefined};

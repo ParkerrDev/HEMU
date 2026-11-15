@@ -15,7 +15,8 @@ U0 VideoCapture()
 {//The completed planar screen image includes TempleOS's native zoom.
   U64 dc=GuestU64(video_image),src=GuestU64(dc+of_dc.body),*dst=g_desk;
   I64 i;
-  if (!dc || dc>=mem_size || GuestU32(dc+of_dc.width_internal)!=640 ||
+  if (g_win_surface || !dc || dc>=mem_size ||
+	GuestU32(dc+of_dc.width_internal)!=640 ||
 	GuestU32(dc+of_dc.height)!=480 || !src || src>=mem_size ||
 	src+153600>mem_size)
     return;

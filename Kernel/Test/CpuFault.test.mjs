@@ -14,7 +14,7 @@ U64 FaultState(I64 n)
 assert.deepEqual(c.warnings,[]);
 const host=createHemuHost({onText:()=>{}}),{instance}=await WebAssembly.instantiate(c.bytes,{env:host.env}),ex=instance.exports;
 host.attach(instance);ex.__rt_init();ex.InitMem(8192n);
-for(const initial of [0n,2n,3n]) {
+for(const initial of [0n,2n,3n,4n]) {
   ex.FaultBegin(initial);
   const code=initial||2n;
   assert.equal(ex.RunCore(100n),-code);

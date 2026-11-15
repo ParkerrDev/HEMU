@@ -1,3 +1,19 @@
+I64 rfl=0,halted=0,icount=0;
+
+I64 MyCore()
+{
+  return 0;
+}
+
+Bool __capture_lock()
+{
+  return TRUE;
+}
+
+U0 __capture_unlock()
+{
+}
+
 U64 dev_colors[16],dev_lba,dev_count,dev_sum,dev_writes,dev_tone,dev_ns;
 
 U0 __host_palette(I64 i,I64 rgb)

@@ -1,3 +1,13 @@
+#define WIN_SURFACE_PORT 0x5047
+#define WIN_SURFACE_LIMIT 32000000
+Bool g_win_surface=FALSE,g_win_run=FALSE;
+I64 g_win_start=0;
+
+Bool WinSurfaceActive()
+{//A failed transaction retains its capture barrier until machine restart.
+  return g_win_surface;
+}
+
 U64 ata_words,ata_seccnt,ata_pos,ata_r3,ata_r4,ata_r5,
       ata_wr,ata_wlba,ata_wcnt;
 U8 *ata_buf;
@@ -114,6 +124,15 @@ U64 IoIn(U64 port)
 {
   I64 b,st=0x1C,next_ms=FALSE;
   U64 value;
+  if (port==WIN_SURFACE_PORT) {
+    if (MyCore || rfl&0x200 || halted || !g_win_run || g_win_surface)
+      return 0;
+    if (!__capture_lock)
+      return 0;
+    g_win_start=icount;
+    g_win_surface=TRUE;
+    return 1;
+  }
   if (port==0x3C9) {
     value=vga_dac[vga_read_pos];
     vga_read_pos=(vga_read_pos+1)%768;
@@ -183,6 +202,13 @@ U0 IoOut(U64 port,U64 v)
 {
   I64 i;
   U64 lba,cnt;
+  if (port==WIN_SURFACE_PORT) {
+    if (!v && !MyCore && !(rfl&0x200) && !halted && g_win_surface) {
+      __capture_unlock;
+      g_win_surface=FALSE;
+    }
+    return;
+  }
   if (port==0x3C7) {
     vga_read_pos=(v&255)*3;
     return;

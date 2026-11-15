@@ -16,6 +16,7 @@ windows and controls. HEMU's standalone `Desktop/` uses the same runtime.
 | `Jit.js` | compiles guest instructions into WASM blocks; registers stay in locals, flags are lazy, and a WASM dispatcher chains blocks |
 | `GuestExec.js` | resolves guest symbols and exposes queued execution, inclusion, file writing and task launches over `GuestCall.HC` |
 | `GuestInput.js`, `KeyQueue.js` | guest mouse metadata, relative motion and IRQ1 keyboard delivery |
+| `GuestWin.HC`, `GuestWindows.js` | optional native document surfaces, task identities and browser tool actions |
 | `QCow2.js`, `DiskStore.js` | sector I/O, FAT32 file access and IndexedDB C: persistence |
 | `Stock.js`, `Ram.js` | captured CPU/RAM/disk identity and sparse RAM reconstruction |
 | `StockDiskWorker.js` | background stock disk download, validation and inflation |
@@ -80,6 +81,37 @@ ownership; hosts forward them to the UI, and pointer lock still requires a user 
 stops when the 64-entry keyboard FIFO fills, leaving the remaining events in the host queue. `InputChk.mjs`
 checks HolyCraft's neutral spawn, idle camera, relative look, held movement, release and a 200-event burst in
 the live guest.
+
+## Optional window surfaces
+
+`windows` worker requests enable or disable passthrough, detach or attach an
+existing task, or create/update/close a browser-owned native DolDoc task.
+`GuestWin.HC` is compiled by TempleOS only when enabled. `GuestWindows.js`
+transports indexed pixels, geometry and queued native button actions; it does
+not draw documents. Slot operations carry both task address and task number so
+closed or reused slots cannot redirect input or kill a replacement task.
+
+Surfaces support bordered native documents, sprites and standard scrollbars.
+Custom DrawIt and control callbacks, custom document tag callbacks, songs,
+fullscreen/captured-pointer programs and persistent graphics stay on the main
+desktop. A window that becomes incompatible returns there. Browser-owned tasks
+use ordinary native document buttons and dispatch actions to their original host
+handlers. Disable restores guest windows and closes only browser-owned tasks.
+
+The renderer uses a bounded virtual I/O transaction at port `0x5047`. Acquisition
+requires core zero in ordinary Run with interrupts disabled, and stops the other
+cores through the existing capture barrier. Run completes the transaction before
+returning, even past its normal frame budget. It rejects injected-call and nested
+capture use. A reopened IF, CPU fault, HLT or 32-million-instruction limit retains
+the stopped machine with fault reason 4; resume and snapshot export require a
+restart. Native code checks document and allocator locks before drawing, restores
+shared drawing buffers, then releases the other cores before ending its try scope.
+
+`Test/GuestWindows.mjs` checks native pixels, input ownership, task lifecycle and
+fallback. `Test/WinSurface.test.mjs` checks port admission, budget draining,
+capture nesting and retained faults. TempleOS-Web supplies the real browser drag
+and native button tests. Saved older engines without `WinSurfaceActive` cannot
+enable passthrough until restarted with a current engine.
 
 ## Stock startup
 
