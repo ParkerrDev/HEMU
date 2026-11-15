@@ -8,12 +8,12 @@ public class CWebWin
   U32 *text;
   U8 *gui;
   CDC *image;
-  I64 gui_focus,gui_press;
+  I64 gui_focus,gui_press,gui_hover;
 };
 
 public CWebWin web_wins[WEB_WINS_NUM];
 public I64 web_win_enabled=0,web_win_input=-1,web_win_result=-1;
-public I64 web_action_head=0,web_action_tail=0,web_actions[192];
+public I64 web_action_head=0,web_action_tail=0,web_actions[512];
 I64 web_win_frame=-1;
 U16 *web_win_z=NULL;
 U0 (*web_win_draw)(CTask *task,CDC *dc)=NULL;
@@ -83,12 +83,21 @@ U0 WebWinStop()
   WinZBufUpdate;
 }
 
-U0 WebWinBefore(CTask *task,CDC *dc)
+U0 WebWinHide()
 {
   I64 i;
   Bool changed=FALSE;
   CWebWin *w;
   web_win_frame=winmgr.updates;
+  for (i=0,w=web_wins;i<WEB_WINS_NUM;i++,w++)
+    if (w->detached && WebWinValid(w))
+      changed|=LBtr(&w->task->display_flags,DISPLAYf_SHOW);
+  if (changed)
+    WinZBufUpdate;
+}
+
+U0 WebWinBefore(CTask *task,CDC *dc)
+{
   if (!web_win_enabled) {
     WebWinStop;
     if (web_win_draw)
@@ -97,11 +106,7 @@ U0 WebWinBefore(CTask *task,CDC *dc)
   }
   if (web_win_draw)
     (*web_win_draw)(task,dc);
-  for (i=0,w=web_wins;i<WEB_WINS_NUM;i++,w++)
-    if (w->detached && WebWinValid(w))
-      changed|=LBtr(&w->task->display_flags,DISPLAYf_SHOW);
-  if (changed)
-    WinZBufUpdate;
+  WebWinHide;
 }
 
 Bool WebWinTaskOK(CTask *task)
@@ -281,7 +286,8 @@ U0 WebWinAfter(CDC *dc)
   if (web_win_final)
     (*web_win_final)(dc);
   ms.show=old_show;
-  if (!web_win_enabled || web_win_frame!=winmgr.updates) {
+  if (!web_win_enabled || web_win_frame!=winmgr.updates ||
+      sys_winmgr_task->draw_it!=&WebWinBefore) {
     WebWinStop;
     return;
   }
@@ -419,6 +425,7 @@ public U0 WebWinDoc(I64 slot,U8 *st)
     return;
   w=&web_wins[slot];
   if (w->owned && WebWinValid(w) && (doc=DocPut(w->task))) {
+    w->task->draw_it=NULL;
     DocClear(doc);
     DocPrint(doc,"%s",st);
     DocTop(doc);
@@ -436,6 +443,9 @@ U0 WebGuiDraw(CTask *task,CDC *dc)
   CWebWin *w;
   CWebGuiCmd *c;
   U8 *end,*payload;
+  //A full-size GUI covers the desktop, so its callback is skipped.
+  if (web_win_frame!=winmgr.updates)
+    WebWinHide;
   if (slot<0 || !(w=&web_wins[slot])->gui)
     return;
   if (!(24<=*w->gui(U32 *)<=0x100000))
@@ -469,8 +479,10 @@ U0 WebGuiDraw(CTask *task,CDC *dc)
 	}
 	break;
       case 4:
-	if (c->id==w->gui_focus) {
+	if (c->id==w->gui_focus || c->id==w->gui_hover) {
 	  dc->color=YELLOW;
+	  if (w->gui_press==c->id)
+	    dc->color=RED;
 	  GrRect(dc,c->x,c->y,c->width,1);
 	  GrRect(dc,c->x,c->y+c->height-1,c->width,1);
 	}
@@ -529,7 +541,8 @@ I64 WebGuiHit(CWebWin *w,I64 x,I64 y,I64 after=-1,I64 kind=4)
   return id;
 }
 
-U0 WebWinAction(I64 slot,I64 id)
+U0 WebWinAction(I64 slot,I64 id,I64 kind=0,I64 x=0,I64 y=0,
+	I64 arg1=0,I64 arg2=0)
 {
   CWebWin *w=&web_wins[slot];
   I64 flags;
@@ -543,9 +556,14 @@ wa_wait:
     goto wa_wait;
   }
   if (web_win_enabled) {
-    web_actions[web_action_head%64*3]=slot;
-    web_actions[web_action_head%64*3+1]=w->task_num;
-    web_actions[web_action_head%64*3+2]=id;
+    web_actions[web_action_head%64*8]=slot;
+    web_actions[web_action_head%64*8+1]=w->task_num;
+    web_actions[web_action_head%64*8+2]=id;
+    web_actions[web_action_head%64*8+3]=kind;
+    web_actions[web_action_head%64*8+4]=x;
+    web_actions[web_action_head%64*8+5]=y;
+    web_actions[web_action_head%64*8+6]=arg1;
+    web_actions[web_action_head%64*8+7]=arg2;
     web_action_head++;
   }
   SetRFlags(flags);
@@ -554,11 +572,13 @@ wa_wait:
 U0 WebWinTask(I64 slot)
 {
   CWebWin *w=&web_wins[slot];
-  I64 arg1,arg2,msg,id,scroll,kind,z=ms.pos.z;
+  I64 arg1,arg2,msg,id,scroll,kind,z=ms.pos.z,x,y,old_x=-1,old_y=-1;
+  Bool inside=FALSE,old_inside=FALSE;
   DocTermNew;
   DocCursor(OFF);
   WinBorder(ON);
-  Fs->win_inhibit=WIG_USER_TASK_DFT;
+  //Send each press immediately; the browser combines double clicks.
+  Fs->win_inhibit=WIG_USER_TASK_DFT|WIG_DBL_CLICK;
   Fs->title_src=TTS_CONST;
   Fs->border_src=BDS_CONST;
   Fs->border_attr=BLUE+WHITE<<4;
@@ -570,7 +590,23 @@ U0 WebWinTask(I64 slot)
   WinZBufUpdate;
   while (TRUE) {
     msg=ScanMsg(&arg1,&arg2,1<<MSG_CMD|1<<MSG_KEY_DOWN|
-	  1<<MSG_MS_L_DOWN|1<<MSG_MS_L_UP);
+	  1<<MSG_MS_L_DOWN|1<<MSG_MS_L_UP|
+	  1<<MSG_MS_L_D_DOWN|1<<MSG_MS_L_D_UP);
+    x=ms.pos.x-Fs->pix_left;
+    y=ms.pos.y-Fs->pix_top;
+    inside=WinInside(ms.pos.x,ms.pos.y,Fs) &&
+	0<=ms.pos_text.x<TEXT_COLS && 0<=ms.pos_text.y<TEXT_ROWS &&
+	Fs->win_z_num>=gr.win_z_buf[ms.pos_text.y*TEXT_COLS+ms.pos_text.x];
+    if (w->gui && (inside || old_inside || w->gui_press) &&
+	(x!=old_x || y!=old_y || inside!=old_inside)) {
+      old_x=x;
+      old_y=y;
+      w->gui_hover=WebGuiHit(w,x,y);
+      if (!inside)
+	w->gui_hover=0;
+      WebWinAction(slot,w->gui_hover,3,x,y);
+    }
+    old_inside=inside;
     if (w->gui && Fs==sys_focus_task && z!=ms.pos.z) {
       scroll=WebGuiHit(w,ms.pos.x-Fs->pix_left,ms.pos.y-Fs->pix_top,-1,5);
       if (scroll) {
@@ -583,20 +619,25 @@ U0 WebWinTask(I64 slot)
     z=ms.pos.z;
     if (msg==MSG_CMD)
       WebWinAction(slot,arg1);
-    if (w->gui && msg==MSG_MS_L_DOWN)
+    if (w->gui && (msg==MSG_MS_L_DOWN || msg==MSG_MS_L_D_DOWN)) {
       w->gui_press=w->gui_focus=WebGuiHit(w,arg1,arg2);
-    if (w->gui && msg==MSG_MS_L_UP) {
+      WebWinAction(slot,w->gui_focus,1,arg1,arg2);
+    }
+    if (w->gui && (msg==MSG_MS_L_UP || msg==MSG_MS_L_D_UP)) {
       id=WebGuiHit(w,arg1,arg2);
+      WebWinAction(slot,id,2,arg1,arg2);
       if (id && id==w->gui_press)
-	WebWinAction(slot,id);
+	WebWinAction(slot,id,0,arg1,arg2);
       w->gui_press=0;
     }
     if (msg==MSG_KEY_DOWN) {
       if (arg1==CH_ESC || arg1==CH_SHIFT_ESC)
 	break;
       if (w->gui) {
-	if (arg1=='\t')
+	if (arg1=='\t') {
 	  w->gui_focus=WebGuiHit(w,0,0,w->gui_focus);
+	  WebWinAction(slot,w->gui_focus,4);
+	}
 	kind=0;
 	switch (arg2.u8[0]) {
 	  case SC_CURSOR_UP: kind=1; break;
@@ -641,6 +682,7 @@ public I64 WebWinHostNew(U8 *title,I64 cols,I64 rows,I64 x,I64 y)
     Yield;
   if (!TaskValidate(task))
     return -1;
+  task->draw_it=&WebGuiDraw;
   StrCpy(task->task_title,title);
   cols=ClampI64(cols,12,TEXT_COLS-2);
   rows=ClampI64(rows,4,TEXT_ROWS-2);

@@ -1,1 +1,1 @@
-holyc-wasm https://github.com/ParkerrDev/HolyC-wasm 2752a5472ba6200edc6f822bc6aeb6e07fe8217d
+holyc-wasm https://github.com/ParkerrDev/HolyC-wasm d42e4060d65ad56492bfc53b86c4a3de78faac5c
