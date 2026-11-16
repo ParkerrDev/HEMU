@@ -18,6 +18,7 @@ public class CWebWin
 
 public CWebWin web_wins[WEB_WINS_NUM];
 public I64 web_win_enabled=0,web_win_input=-1,web_win_result=-1;
+public I64 web_win_no_close=0;
 public I64 web_action_head=0,web_action_tail=0,web_actions[512];
 U8 *web_action_text[64];
 CWebWin *web_gui_capture=NULL;
@@ -29,6 +30,20 @@ U0 (*web_win_final)(CDC *dc)=NULL;
 Bool WebWinValid(CWebWin *w)
 {
   return TaskValidate(w->task) && w->task->task_num==w->task_num;
+}
+
+public U0 WebWinCloseEnable(I64 slot,Bool val)
+{//Keep essential windows open without blocking native move or resize.
+  CDoc *doc=DocBorder(web_wins[slot].task);
+  CDocEntry *doc_e;
+  Bool unlock=DocLock(doc);
+  for (doc_e=doc->head.next;doc_e!=doc;doc_e=doc_e->next)
+    if (doc_e->de_flags&DOCEF_TAG && doc_e->tag &&
+	!StrCmp(doc_e->tag,"[X]"))
+      LBEqu(&doc_e->de_flags,DOCEf_SKIP,!val);
+  LBEqu(&web_win_no_close,slot,!val);
+  if (unlock)
+    DocUnlock(doc);
 }
 
 U0 WebGuiRelease(CWebWin *w)
@@ -1212,7 +1227,8 @@ U0 WebWinTask(I64 slot)
 	kind++;
       WebWinAction(slot,w->gui_focus,kind,0,0,arg1,arg2.u32[0]);
     } else if (msg==MSG_KEY_DOWN) {
-      if (arg1==CH_ESC || arg1==CH_SHIFT_ESC)
+      if ((arg1==CH_ESC || arg1==CH_SHIFT_ESC) &&
+	!Bt(&web_win_no_close,slot))
 	break;
       if (w->gui) {
 	if (arg1=='\t') {
@@ -1259,6 +1275,7 @@ public I64 WebWinHostNew(U8 *title,I64 cols,I64 rows,I64 x,I64 y)
     return -1;
   web_wins[i].owned=1;
   web_wins[i].show=1;
+  LBtr(&web_win_no_close,i);
   task=Spawn(&WebWinTask,i,title,,adam_task);
   if (!task) {
     web_wins[i].owned=0;
