@@ -8,6 +8,10 @@ public class CWebWin
   U32 *text;
   U8 *gui;
   CDC *image;
+  CDoc *gui_doc;
+  CTask *gui_view;
+  U8 *gui_value;
+  I64 gui_epoch,gui_kind,gui_limit,gui_submit,gui_anchor;
   I64 gui_focus,gui_press,gui_hover,gui_edit,gui_capture,gui_ms_show,
 	gui_ms_x,gui_ms_y,gui_center_x,gui_center_y;
 };
@@ -70,6 +74,9 @@ public Bool WebWinTaskFocus(CTask *task,I64 task_num)
 U0 WebWinFree(CWebWin *w)
 {
   WebGuiRelease(w);
+  DocDel(w->gui_doc);
+  Free(w->gui_view);
+  Free(w->gui_value);
   DCDel(w->dc);
   Free(w->text);
   Free(w->gui);
@@ -466,6 +473,8 @@ class CWebGuiCmd
   I32 kind,x,y,width,height,color,id,size;
 };
 
+extern U0 WebGuiDocDraw(CWebWin *w,CDC *dc);
+
 U0 WebGuiDraw(CTask *task,CDC *dc)
 {
   I64 slot=WebWinFind(task),i,cnt;
@@ -518,6 +527,7 @@ U0 WebGuiDraw(CTask *task,CDC *dc)
     }
     c=payload+c->size;
   }
+  WebGuiDocDraw(w,dc);
 }
 
 public U8 *WebWinGuiAlloc(I64 slot)
@@ -698,67 +708,287 @@ U0 WebGuiMotion(I64 slot)
     WebWinAction(slot,w->gui_capture,12,x,y,c->width,c->height);
 }
 
-Bool WebGuiTextKey(CDoc *doc,U8 *,I64 ch,I64 sc)
-{//Single-line acceptance uses the native editor, not a host text field.
-  if (ch=='\n' && !(sc&SCF_SHIFT)) {
-    doc->user_put_data=1;
-    Msg(MSG_KEY_DOWN,CH_ESC,0,1<<JOBf_DONT_FILTER);
-    return TRUE;
+CWebGuiCmd *WebGuiCmdFind(CWebWin *w,I64 id,I64 kind)
+{
+  CWebGuiCmd *c;
+  U8 *end,*payload;
+  I64 i,cnt;
+  if (!w->gui || !(24<=*w->gui(U32 *)<=0x100000))
+    return NULL;
+  end=w->gui+*w->gui(U32 *);
+  cnt=w->gui(U32 *)[1];
+  c=w->gui+24;
+  for (i=0;i<cnt && c(U8 *)+sizeof(CWebGuiCmd)<=end;i++) {
+    payload=c(U8 *)+sizeof(CWebGuiCmd);
+    if (c->size<0 || payload+c->size>end)
+      break;
+    if (c->kind==kind && c->id==id)
+      return c;
+    c=payload+c->size;
   }
-  return FALSE;
+  return NULL;
 }
 
-U8 *WebGuiField(U8 *st,I64 kind,I64 limit)
+CWebGuiCmd *WebGuiFieldCmd(CWebWin *w,I64 id)
 {
-  U8 *title=st,*value=st+StrLen(st)+1,*res=NULL;
-  CDoc *doc;
-  I64 i=0,n;
-  Bool ok;
-  StrCpy(Fs->task_title,title);
-  Fs->title_src=TTS_LOCKED_CONST;
-  if (kind==3) {
-    doc=DocNew;
-    st=value+StrLen(value)+1;
-    while (*st) {
-      if (*st=='1')
-	DocPrint(doc,"$$MU,\"%$$Q\",LE=%d,RE=%d$$\n",st+1,i,i);
-      else
-	DocPrint(doc,"$$DKGRAY$$%$$s$$FG$$\n",st+1);
-      st+=StrLen(st)+1;
-      i++;
-    }
-    n=PopUpMenu(doc);
-    DocDel(doc);
-    if (n!=DOCM_CANCEL)
-      res=MStrPrint("%d",n);
-  } else {
-    doc=DocNew;
-    doc->flags|=DOCF_PLAIN_TEXT|DOCF_ALLOW_UNDO;
-    DocPrint(doc,"%s",value);
-    DocBottom(doc);
-    if (kind==1) {
-      doc->user_put_key=&WebGuiTextKey;
-      doc->user_put_data=NULL;
-    }
-wg_edit:
-    doc->flags&=~DOCF_NO_CURSOR;
-    if (kind==1)
-      doc->user_put_data=NULL;
-    ok=DocEd(doc,DOF_DONT_HOME);
-    if (kind==1)
-      ok=ok && doc->user_put_data;
-    if (ok) {
-      doc->flags|=DOCF_NO_CURSOR;
-      res=DocSave(doc);
-      if (limit>0 && StrLen(res)>limit) {
-	Free(res);
-	res=NULL;
-	PopUpOk("Text exceeds this field's size limit. Nothing was saved.");
-	goto wg_edit;
-      }
-    }
-    DocDel(doc);
+  CWebGuiCmd *c=WebGuiCmdFind(w,id,6);
+  U8 *st;
+  I64 i;
+  if (!c || !(1<=c->x<=3) || !(0<c->y<=65536) || c->size<3)
+    return NULL;
+  st=c(U8 *)+sizeof(CWebGuiCmd);
+  if (st[c->size-1] || st[c->size-2])
+    return NULL;
+  for (i=0;i<c->size-2 && st[i];i++);
+  if (i==c->size-2 || i>=STR_LEN)
+    return NULL;
+  return c;
+}
+
+Bool WebGuiDocView(CWebWin *w)
+{//A document viewport shares its owner's heap, never its window geometry.
+  CWebGuiCmd *c=WebGuiCmdFind(w,w->gui_edit,9);
+  CTask *view=w->gui_view,*task=w->task;
+  I64 l,t,r,b;
+  if (!c || c->x<0 || c->y<0 || c->width<8 || c->height<8)
+    return FALSE;
+  l=task->win_left+(c->x+7)/8;
+  t=task->win_top+(c->y+7)/8;
+  r=MinI64(task->win_right,task->win_left+(c->x+c->width)/8-1);
+  b=MinI64(task->win_bottom,task->win_top+(c->y+c->height)/8-1);
+  if (l>r || t>b || l<0 || t<0 || r>=TEXT_COLS || b>=TEXT_ROWS)
+    return FALSE;
+  MemCpy(view,task,sizeof(CTask));
+  view->addr=view;
+  view->data_heap=adam_task->data_heap;
+  QueInit(&view->next_ctrl);
+  view->win_left=l; view->win_right=r;
+  view->win_top=t; view->win_bottom=b;
+  view->win_width=r-l+1; view->win_height=b-t+1;
+  view->pix_left=l*8; view->pix_right=(r+1)*8-1;
+  view->pix_top=t*8; view->pix_bottom=(b+1)*8-1;
+  view->pix_width=view->win_width*8;
+  view->pix_height=view->win_height*8;
+  view->scroll_x=view->scroll_y=view->scroll_z=0;
+  MemSet(&view->horz_scroll,0,sizeof(CWinScroll));
+  MemSet(&view->vert_scroll,0,sizeof(CWinScroll));
+  view->text_attr=c->color&255;
+  Bts(&view->display_flags,DISPLAYf_NO_BORDER);
+  return TRUE;
+}
+
+U8 *WebGuiDocValue(CDoc *doc)
+{//Save plain CP437 text without inserting a DolDoc cursor marker.
+  U8 *res;
+  Bool unlock=DocLock(doc),no_cursor=Bt(&doc->flags,DOCf_NO_CURSOR);
+  doc->flags|=DOCF_NO_CURSOR;
+  res=DocSave(doc);
+  LBEqu(&doc->flags,DOCf_NO_CURSOR,no_cursor);
+  if (unlock)
+    DocUnlock(doc);
+  return res;
+}
+
+U0 WebGuiDocPublish(I64 slot)
+{
+  CWebWin *w=&web_wins[slot];
+  U8 *st;
+  if (!w->gui_doc)
+    return;
+  st=WebGuiDocValue(w->gui_doc);
+  if (StrLen(st)<=w->gui_limit && StrCmp(st,w->gui_value)) {
+    Free(w->gui_value);
+    w->gui_value=StrNew(st,adam_task);
+    WebWinAction(slot,w->gui_edit,5,w->gui_epoch,0,0,0,st);
   }
+  Free(st);
+}
+
+U0 WebGuiDocDel(CWebWin *w)
+{
+  CDoc *doc=w->gui_doc;
+  CTask *view=w->gui_view;
+  U8 *value=w->gui_value;
+  w->gui_doc=NULL;
+  w->gui_view=NULL;
+  w->gui_value=NULL;
+  w->gui_edit=0;
+  DocDel(doc);
+  Free(view);
+  Free(value);
+}
+
+U0 WebGuiDocSync(CWebWin *w)
+{//Only a new host epoch replaces native edits; scene echoes never do.
+  CWebGuiCmd *c;
+  CDoc *doc=w->gui_doc;
+  U8 *st;
+  Bool unlock;
+  if (!doc)
+    return;
+  c=WebGuiFieldCmd(w,w->gui_edit);
+  if (!c || c->x==3) {
+    WebGuiDocDel(w);
+    return;
+  }
+  unlock=DocLock(doc);
+  w->gui_kind=c->x;
+  w->gui_limit=c->y;
+  w->gui_submit=c->width;
+  if (w->gui_epoch!=c->height) {
+    st=c(U8 *)+sizeof(CWebGuiCmd);
+    st+=StrLen(st)+1;
+    DocRst(doc,TRUE);
+    doc->flags|=DOCF_PLAIN_TEXT|DOCF_ALLOW_UNDO|
+	  DOCF_NO_SCROLL_BARS|DOCF_DONT_SWAP_OUT;
+    DocPrint(doc,"%s",st);
+    DocBottom(doc);
+    Free(w->gui_value);
+    w->gui_value=StrNew(st,adam_task);
+    w->gui_epoch=c->height;
+  }
+  WebGuiDocView(w);
+  if (unlock)
+    DocUnlock(doc);
+}
+
+U0 WebGuiDocDraw(CWebWin *w,CDC *dc)
+{//Draw DolDoc's native cells above the browser scene using Terry's font.
+  CDoc *doc=w->gui_doc;
+  CTask *view=w->gui_view;
+  I64 x,y,xx,yy,ch,attr;
+  Bool unlock,blink=Blink;
+  if (!doc || Bt(&doc->locked_flags,DOClf_LOCKED) && doc->owning_task!=Fs)
+    return;
+  unlock=DocLock(doc);
+  if (WebGuiDocView(w)) {
+    LBEqu(&doc->flags,DOCf_HIDE_CURSOR,
+	  w->task!=sys_focus_task || w->gui_focus!=w->gui_edit);
+    DocRecalc(doc,RECALCF_HAS_CURSOR);
+    TextRect(view->win_left,view->win_right,view->win_top,
+	  view->win_bottom,view->text_attr<<8);
+    DocRecalc(doc,RECALCt_TO_SCRN|RECALCF_HAS_CURSOR);
+    dc->color=view->text_attr>>4;
+    GrRect(dc,view->pix_left-w->task->pix_left,
+	  view->pix_top-w->task->pix_top,view->pix_width,view->pix_height);
+    for (y=view->win_top;y<=view->win_bottom;y++)
+      for (x=view->win_left;x<=view->win_right;x++) {
+	ch=gr.text_base[y*TEXT_COLS+x];
+	attr=ch.u8[1];
+	if (ch&ATTRF_SEL)
+	  attr^=255;
+	if (ch&ATTRF_INVERT)
+	  attr=attr<<4+attr>>4;
+	if (ch&ATTRF_BLINK && blink)
+	  attr=attr<<4+attr>>4;
+	xx=x*8-w->task->pix_left;
+	yy=y*8-w->task->pix_top;
+	if (attr>>4&15!=view->text_attr>>4) {
+	  dc->color=attr>>4&15;
+	  GrRect(dc,xx,yy,8,8);
+	}
+	if (ch.u8[0] && ch.u8[0]!=CH_SPACE || ch&ATTRF_UNDERLINE)
+	  if (x*8+8<=dc->width && y*8+8<=dc->height &&
+		!IsPixCovered0(w->task,x*8,y*8)) {
+	    ch.u8[1]=attr&15;
+	    GrRopEquU8NoClipping(ch&(ATTRF_UNDERLINE+0xFFF),
+		  dc->body+y*8*dc->width_internal+x*8,dc->width_internal);
+	  }
+      }
+  }
+  if (unlock)
+    DocUnlock(doc);
+}
+
+I64 WebGuiDocPos(CDoc *doc)
+{
+  CDocEntry *e=doc->head.next;
+  I64 res=0;
+  while (e!=doc && e!=doc->cur_entry) {
+    if (e->type_u8==DOCT_TEXT)
+      res+=StrLen(e->tag);
+    else if (e->type_u8==DOCT_TAB || e->type_u8==DOCT_NEW_LINE)
+      res++;
+    e=e->next;
+  }
+  if (e!=doc)
+    res+=doc->cur_col-e->min_col;
+  return res;
+}
+
+U0 WebGuiDocSeek(CDoc *doc,I64 pos)
+{
+  CDocEntry *e=doc->head.next;
+  I64 n;
+  while (e!=doc) {
+    n=0;
+    if (e->type_u8==DOCT_TEXT)
+      n=StrLen(e->tag);
+    else if (e->type_u8==DOCT_TAB || e->type_u8==DOCT_NEW_LINE)
+      n=1;
+    if (pos<n)
+      break;
+    pos-=n;
+    e=e->next;
+  }
+  doc->cur_entry=e;
+  doc->cur_col=e->min_col+pos;
+}
+
+U0 WebGuiDocMouse(CWebWin *w,I64 x,I64 y,Bool select=FALSE)
+{
+  CDoc *doc=w->gui_doc;
+  CTask *view=w->gui_view;
+  I64 pos,i;
+  Bool unlock;
+  if (!doc)
+    return;
+  unlock=DocLock(doc);
+  if (WebGuiDocView(w)) {
+    DocRecalc(doc,RECALCF_HAS_CURSOR);
+    doc->x=ClampI64((x+w->task->pix_left-view->pix_left)/8,
+	  0,view->win_width-1)+doc->line_start_col;
+    doc->y=ClampI64((y+w->task->pix_top-view->pix_top)/8,
+	  0,view->win_height-1)+doc->top_line_num;
+    DocRecalc(doc,RECALCt_FIND_CURSOR);
+    pos=WebGuiDocPos(doc);
+    EdSelAll(doc,FALSE);
+    if (select) {
+      WebGuiDocSeek(doc,w->gui_anchor);
+      if (pos>=w->gui_anchor)
+	for (i=w->gui_anchor;i<pos;i++)
+	  EdCursorRight(doc,SCF_SHIFT);
+      else
+	for (i=w->gui_anchor;i>pos;i--)
+	  EdCursorLeft(doc,SCF_SHIFT);
+      DocRecalc(doc,RECALCF_HAS_CURSOR);
+    } else
+      w->gui_anchor=pos;
+  }
+  if (unlock)
+    DocUnlock(doc);
+}
+
+U8 *WebGuiChoice(U8 *st)
+{
+  U8 *value=st+StrLen(st)+1,*res=NULL;
+  CDoc *doc=DocNew;
+  I64 i=0,n;
+  StrCpy(Fs->task_title,st);
+  Fs->title_src=TTS_LOCKED_CONST;
+  st=value+StrLen(value)+1;
+  while (*st) {
+    if (*st=='1')
+      DocPrint(doc,"$$MU,\"%$$Q\",LE=%d,RE=%d$$\n",st+1,i,i);
+    else
+      DocPrint(doc,"$$DKGRAY$$%$$s$$FG$$\n",st+1);
+    st+=StrLen(st)+1;
+    i++;
+  }
+  n=PopUpMenu(doc);
+  DocDel(doc);
+  if (n!=DOCM_CANCEL)
+    res=MStrPrint("%d",n);
   if (res) {
     st=StrNew(res,Fs->parent_task);
     Free(res);
@@ -768,44 +998,117 @@ wg_edit:
 }
 
 Bool WebGuiEdit(I64 slot,I64 id)
-{//Guest controls return values only after native editing accepts them.
+{//Text stays in its owner's window; a choice uses TempleOS's native menu.
   CWebWin *w=&web_wins[slot];
-  CWebGuiCmd *c=w->gui+24;
-  U8 *end=w->gui+*w->gui(U32 *),*payload,*st,*cmd,*res;
-  I64 i,cnt=w->gui(U32 *)[1],kind,limit,submit;
-  for (i=0;i<cnt && c(U8 *)+sizeof(CWebGuiCmd)<=end;i++) {
-    payload=c(U8 *)+sizeof(CWebGuiCmd);
-    if (c->size<0 || payload+c->size>end)
-      break;
-    if (c->kind==6 && c->id==id) {
-      if (!(1<=c->x<=3) || !(0<c->y<=65536) ||
-	  c->size<3 || payload[c->size-1] || payload[c->size-2])
-	return TRUE;
-      for (i=0;i<c->size-2 && payload[i];i++);
-      if (i==c->size-2 || i>=STR_LEN)
-	return TRUE;
-      kind=c->x;
-      limit=c->y;
-      submit=c->width;
-      st=MAlloc(c->size);
-      MemCpy(st,payload,c->size);
-      w->gui_edit=id;
-      cmd=MStrPrint("WebGuiField(0x%X,%d,%d);",st,kind,limit);
-      res=PopUp(cmd,Fs);
-      if (res) {
-	WebWinAction(slot,id,5,0,0,0,0,res);
-	if (submit)
-	  WebWinAction(slot,id,6);
-	Free(res);
-      }
-      w->gui_edit=0;
-      Free(cmd);
+  CWebGuiCmd *c=WebGuiFieldCmd(w,id);
+  U8 *st,*value,*cmd,*res;
+  I64 epoch;
+  if (!c)
+    return !!WebGuiCmdFind(w,id,6);
+  if (w->gui_doc && w->gui_edit==id)
+    return TRUE;
+  WebGuiDocPublish(slot);
+  WebGuiDocDel(w);
+  st=MAlloc(c->size);
+  MemCpy(st,c(U8 *)+sizeof(CWebGuiCmd),c->size);
+  value=st+StrLen(st)+1;
+  epoch=c->height;
+  if (c->x==3) {
+    cmd=MStrPrint("WebGuiChoice(0x%X);",st);
+    res=PopUp(cmd,Fs);
+    if (res) {
+      WebWinAction(slot,id,5,epoch,0,0,0,res);
+      Free(res);
+    }
+    Free(cmd);
+  } else if (WebGuiCmdFind(w,id,9)) {
+    w->gui_edit=id;
+    w->gui_kind=c->x;
+    w->gui_limit=c->y;
+    w->gui_submit=c->width;
+    w->gui_epoch=epoch;
+    w->gui_view=CAlloc(sizeof(CTask),adam_task);
+    w->gui_doc=DocNew(,adam_task);
+    w->gui_doc->win_task=w->gui_view;
+    w->gui_doc->flags|=DOCF_PLAIN_TEXT|DOCF_ALLOW_UNDO|
+	  DOCF_NO_SCROLL_BARS|DOCF_DONT_SWAP_OUT;
+    w->gui_value=StrNew(value,adam_task);
+    if (!WebGuiDocView(w)) {
+      WebGuiDocDel(w);
       Free(st);
       return TRUE;
     }
-    c=payload+c->size;
+    DocPrint(w->gui_doc,"%s",value);
+    DocBottom(w->gui_doc);
   }
-  return FALSE;
+  Free(st);
+  return TRUE;
+}
+
+Bool WebGuiDocKey(I64 slot,I64 ch,I64 sc)
+{
+  CWebWin *w=&web_wins[slot];
+  CDoc *doc=w->gui_doc;
+  U8 *old,*value;
+  Bool unlock;
+  if (!doc || w->gui_focus!=w->gui_edit)
+    return FALSE;
+  if (ch==CH_ESC || ch==CH_SHIFT_ESC || ch=='\t' && w->gui_kind==1) {
+    WebGuiDocPublish(slot);
+    if (ch!='\t')
+      w->gui_focus=0;
+    return ch!='\t';
+  }
+  if (ch=='\n' && w->gui_kind==1) {
+    WebGuiDocPublish(slot);
+    if (w->gui_submit)
+      WebWinAction(slot,w->gui_edit,6,w->gui_epoch);
+    return TRUE;
+  }
+  if (sc&SCF_ALT && ch!=CH_BACKSPACE)
+    return TRUE;
+  if (sc&SCF_CTRL && ch!=CH_CTRLA && ch!=CH_CTRLC &&
+	ch!=CH_CTRLV && ch!=CH_CTRLX && ch!=CH_CTRLY &&
+	ch!=CH_CTRLZ && ch!=CH_BACKSPACE && ch)
+    return TRUE;
+  if (!ch && !(SC_HOME<=sc.u8[0]<=SC_DELETE))
+    return TRUE;
+  unlock=DocLock(doc);
+  WebGuiDocView(w);
+  old=WebGuiDocValue(doc);
+  if (ch==CH_CTRLA)
+    EdSelAll(doc,TRUE);
+  else if (ch==CH_CTRLZ)
+    DocUndoRestore(doc);
+  else
+    DocPutKey(doc,ch,sc);
+  DocRecalc(doc,RECALCF_HAS_CURSOR);
+  value=WebGuiDocValue(doc);
+  if (StrLen(value)>w->gui_limit && StrLen(value)>StrLen(old) ||
+	w->gui_kind==1 && StrOcc(value,'\n')) {
+    DocRst(doc,TRUE);
+    doc->flags|=DOCF_PLAIN_TEXT|DOCF_ALLOW_UNDO|
+	  DOCF_NO_SCROLL_BARS|DOCF_DONT_SWAP_OUT;
+    DocPrint(doc,"%s",old);
+    DocBottom(doc);
+  }
+  Free(old);
+  Free(value);
+  if (unlock)
+    DocUnlock(doc);
+  WebGuiDocPublish(slot);
+  return TRUE;
+}
+
+U0 WebWinTaskEnd()
+{//A killed owner must release its Adam-owned document before cleanup.
+  I64 slot=WebWinFind(Fs);
+  if (slot>=0) {
+    WebGuiRelease(&web_wins[slot]);
+    if (web_wins[slot].gui_doc)
+      DocUnlock(web_wins[slot].gui_doc);
+  }
+  Exit;
 }
 
 U0 WebWinTask(I64 slot)
@@ -819,7 +1122,7 @@ U0 WebWinTask(I64 slot)
   DocCursor(OFF);
   WinBorder(ON);
   //Send each press immediately; the browser combines double clicks.
-  Fs->win_inhibit=WIG_USER_TASK_DFT|WIG_DBL_CLICK;
+  Fs->win_inhibit=WIG_USER_TASK_DFT|WIG_DBL_CLICK|WIF_SELF_GRAB_SCROLL;
   Fs->title_src=TTS_CONST;
   Fs->border_src=BDS_CONST;
   Fs->border_attr=BLUE+WHITE<<4;
@@ -829,11 +1132,13 @@ U0 WebWinTask(I64 slot)
   LBts(&Fs->display_flags,DISPLAYf_SHOW);
   WinToTop;
   WinZBufUpdate;
+  Fs->task_end_cb=&WebWinTaskEnd; //WebWinHostNew waits for initialization.
   while (TRUE) {
     msg=ScanMsg(&arg1,&arg2,1<<MSG_CMD|1<<MSG_KEY_DOWN|1<<MSG_KEY_UP|
 	  1<<MSG_MS_L_DOWN|1<<MSG_MS_L_UP|
 	  1<<MSG_MS_L_D_DOWN|1<<MSG_MS_L_D_UP);
     WebGuiMotion(slot);
+    WebGuiDocSync(w);
     x=ms.pos.x-Fs->pix_left;
     y=ms.pos.y-Fs->pix_top;
     inside=WinInside(ms.pos.x,ms.pos.y,Fs) &&
@@ -848,6 +1153,8 @@ U0 WebWinTask(I64 slot)
       if (!inside)
 	w->gui_hover=0;
       WebWinAction(slot,w->gui_hover,3,x,y);
+      if (w->gui_doc && ms.lb && w->gui_press==w->gui_edit)
+	WebGuiDocMouse(w,x,y,TRUE);
     }
     old_inside=inside;
     if (key_owner && (Fs!=sys_focus_task || key_owner!=w->gui_focus)) {
@@ -873,7 +1180,14 @@ U0 WebWinTask(I64 slot)
       id=w->gui_capture;
       if (!id)
 	id=WebGuiHit(w,arg1,arg2);
+      if (w->gui_doc && id!=w->gui_edit)
+	WebGuiDocPublish(slot);
       w->gui_press=w->gui_focus=id;
+      input=WebGuiFieldCmd(w,id);
+      if (input && input->x!=3) {
+	WebGuiEdit(slot,id);
+	WebGuiDocMouse(w,arg1,arg2);
+      }
       WebWinAction(slot,w->gui_focus,1,arg1,arg2);
     }
     if (w->gui && (msg==MSG_MS_L_UP || msg==MSG_MS_L_D_UP)) {
@@ -886,7 +1200,8 @@ U0 WebWinTask(I64 slot)
 	  WebWinAction(slot,id,0,arg1,arg2);
       w->gui_press=0;
     }
-    if ((msg==MSG_KEY_DOWN || msg==MSG_KEY_UP) &&
+    if (msg==MSG_KEY_DOWN && WebGuiDocKey(slot,arg1,arg2)) {
+    } else if ((msg==MSG_KEY_DOWN || msg==MSG_KEY_UP) &&
 	(input=WebGuiInput(w,w->gui_focus)) &&
 	(input->kind==7 || arg1!='\t' && arg1!=CH_ESC &&
 	arg1!=CH_SHIFT_ESC && arg1!=CH_SPACE)) {
@@ -903,6 +1218,9 @@ U0 WebWinTask(I64 slot)
 	if (arg1=='\t') {
 	  w->gui_focus=WebGuiHit(w,0,0,w->gui_focus);
 	  WebWinAction(slot,w->gui_focus,4);
+	  input=WebGuiFieldCmd(w,w->gui_focus);
+	  if (input && input->x!=3)
+	    WebGuiEdit(slot,w->gui_focus);
 	}
 	kind=0;
 	switch (arg2.u8[0]) {
@@ -925,6 +1243,8 @@ U0 WebWinTask(I64 slot)
     if (!msg)
       Sleep(10);
   }
+  WebGuiDocPublish(slot);
+  WebGuiDocDel(w);
   WebGuiRelease(w);
 }
 
@@ -946,7 +1266,7 @@ public I64 WebWinHostNew(U8 *title,I64 cols,I64 rows,I64 x,I64 y)
   }
   web_wins[i].task=task;
   web_wins[i].task_num=task->task_num;
-  while (TaskValidate(task) && !DocPut(task))
+  while (TaskValidate(task) && task->task_end_cb!=&WebWinTaskEnd)
     Yield;
   if (!TaskValidate(task))
     return -1;
