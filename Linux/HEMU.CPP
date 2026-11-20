@@ -59,7 +59,7 @@ typedef bool Bool;
 #define ML_STR		40
 #define ML_OFFSET	80
 
-char **args;
+char **args,*tst; //tst is the play check's directory, from -t.
 U8 *mem,*dsk; //The guest's RAM and its disk C.
 I64 mem_size,dsk_size;
 I32 kvm,vm,core_fd[CORES_NUM];
@@ -67,10 +67,11 @@ struct kvm_run *core_run[CORES_NUM];
 pthread_mutex_t dev_lock=PTHREAD_MUTEX_INITIALIZER;
 
 U64 hash_tbl, //The captured task's table. Its chain ends at Adam's.
-	ms_pos,ms_pos_text,ms_lb,ms_rb,gr_dc1,gr_zoomed_dc,gr_scrn_zoom;
+	ms_pos,ms_pos_text,ms_presnap,ms_lb,ms_rb,gr_dc1,gr_zoomed_dc,gr_scrn_zoom;
 I64 dc_body,hpet0,hpet_freq,ns0;
 
-I32 wl,scrn_evt; //The compositor's socket. A finished frame wakes scrn_evt.
+I32 wl,scrn_evt, //The compositor's socket. A finished frame wakes scrn_evt.
+	tst_keys=-1;
 U32 wl_id=2, //The next object's id. The display is 1.
 	wl_reg,wl_cb,wl_comp,wl_shm,wl_seat,wl_base,wl_view,wl_frac,
 	wl_surf,wl_xsurf,wl_top,wl_port,wl_scale,wl_ptr,wl_kbd,wl_pool,wl_buf,
@@ -87,7 +88,7 @@ U16 ata_reg[8];
 U64 kbd_down[2]; //A bit a key that is held.
 I64 kbd_head,kbd_tail,kbd_cmd,kbd_type,kbd_rpt_key,kbd_rpt_ns,
 	rtc_idx,vga_idx,vga_rd,vga_wr,ata_len,ms_wheel;
-Bool ata_wr;
+Bool ata_wr,tst_frame;
 
 class CWlGlbl
 {public:
@@ -112,7 +113,10 @@ I64 Ns()
 }
 
 U0 Rst()
-{//A reset is the capture again. main went to HEMU's directory.
+{//A reset is the capture again. main went to HEMU's directory. It ends a
+//play check's run.
+  if (tst)
+    exit(2);
   execv("HEMU",args);
   Die("HEMU");
 }
@@ -178,6 +182,7 @@ U0 SymInit(U64 task)
   hash_tbl=GuestU64(task+TASK_HASH_TABLE);
   ms_pos=Var("ms","CMsStateGlbls","pos");
   ms_pos_text=Var("ms","CMsStateGlbls","pos_text");
+  ms_presnap=Var("ms","CMsStateGlbls","presnap");
   ms_lb=Var("ms","CMsStateGlbls","lb");
   ms_rb=Var("ms","CMsStateGlbls","rb");
   //The pointer is HEMU's. With irqs_working, WinMgr does not poll port
@@ -332,7 +337,7 @@ U0 WinNew()
   Wl(wl_base,2,"uu",wl_xsurf=wl_id++,wl_surf); //get_xdg_surface
   Wl(wl_xsurf,1,"u",wl_top=wl_id++); //get_toplevel
   Wl(wl_top,2,"s","TempleOS"); //set_title
-  Wl(wl_top,3,"s","HEMU"); //set_app_id
+  Wl(wl_top,3,"s",tst?"HEMUTEST":"HEMU"); //set_app_id
   if (wl_view)
     Wl(wl_view,1,"uu",wl_port=wl_id++,wl_surf); //get_viewport
   if (wl_view && wl_frac) //get_fractional_scale
@@ -406,6 +411,8 @@ U0 MsSet(I32 x,I32 y)
     y=SCRN_H-1;
   *(I64 *)(mem+ms_pos)=x;
   *(I64 *)(mem+ms_pos+8)=y;
+  *(I64 *)(mem+ms_presnap)=x; //WinQueIPMsgs detects motion here.
+  *(I64 *)(mem+ms_presnap+8)=y;
   *(I64 *)(mem+ms_pos_text)=x/8;
   *(I64 *)(mem+ms_pos_text+8)=y/8;
 }
@@ -426,7 +433,8 @@ U0 WlEvt(U32 *m)
     WinNew();
   else if (obj==wl_base)
     Wl(wl_base,3,"u",m[2]); //ping: pong
-  else if (obj==wl_seat && !op) {//capabilities
+  else if (obj==wl_seat && !op && !tst) {//capabilities. A play check's
+//keys and mouse are its own: focus going between its windows sends none.
     if (m[2]&1 && !wl_ptr)
       Wl(wl_seat,0,"u",wl_ptr=wl_id++); //get_pointer
     if (m[2]&2 && !wl_kbd)
@@ -462,6 +470,7 @@ U0 WlEvt(U32 *m)
       ms_z+=ms_wheel/3840;
       ms_wheel%=3840;
       *(I64 *)(mem+ms_pos+16)=ms_z;
+      *(I64 *)(mem+ms_presnap+16)=ms_z;
     }
   } else if (obj==wl_kbd) {
     if (op==3) //key: serial,time,key,state
@@ -473,23 +482,46 @@ U0 WlEvt(U32 *m)
   }
 }
 
+U0 TstKeys()
+{//The play check's keys.fifo: lines of an evdev key and 1 or 0 for down or
+//up, and F for the next frame in frame.ppm.
+  static char in[256];
+  static I64 n;
+  char *ptr=in,*end;
+  I64 key,len=read(tst_keys,in+n,sizeof(in)-1-n);
+  if (len<=0)
+    return;
+  in[n+=len]=0;
+  for (;(end=strchr(ptr,'\n'));ptr=end+1)
+    if (*ptr=='F')
+      tst_frame=TRUE;
+    else {
+      key=strtol(ptr,&ptr,10);
+      KeySet(key,strtol(ptr,NULL,10));
+    }
+  memmove(in,ptr,n-=ptr-in);
+}
+
 U0 WinTask()
 {//The window: the compositor's events, TempleOS's finished frames and the
 //held key's repeats.
   U32 in[1024];
   I64 n=0,i,len,wait;
   U64 cnt;
-  struct pollfd pfd[2];
+  struct pollfd pfd[3];
   pfd[0].fd=wl;
   pfd[1].fd=scrn_evt;
-  pfd[0].events=pfd[1].events=POLLIN;
+  pfd[2].fd=tst_keys; //Poll leaves out -1.
+  pfd[0].events=pfd[1].events=pfd[2].events=POLLIN;
   while (TRUE) {
     wait=-1; //Until the held key repeats.
     if (kbd_rpt_key && (wait=(kbd_rpt_ns-Ns())/1000000+1)<0)
       wait=0;
-    poll(pfd,2,wait);
+    poll(pfd,3,wait);
     pthread_mutex_lock(&dev_lock);
     KbdRpt();
+    if (pfd[2].revents)
+      TstKeys();
     if (pfd[0].revents) {
       if ((len=read(wl,(U8 *)in+n,sizeof(in)-n))<=0)
 	exit(0);
@@ -502,6 +534,22 @@ U0 WinTask()
     if (pfd[1].revents && read(scrn_evt,&cnt,8)>0)
       ScrnDraw();
   }
+}
+
+U0 FrameWrite()
+{//The last frame as frame.ppm, for the play check.
+  FILE *f=fopen("frame.tmp","w");
+  U8 *src=(U8 *)scrn;
+  I64 i;
+  fprintf(f,"P6 640 480 255\n");
+  for (i=0;i<SCRN_W*SCRN_H;i++,src++) {
+    fputc(pal[*src]>>16,f);
+    fputc(pal[*src]>>8,f);
+    fputc(pal[*src],f);
+  }
+  fclose(f);
+  rename("frame.tmp","frame.ppm");
+  tst_frame=FALSE;
 }
 
 U0 ScrnGet()
@@ -527,6 +575,8 @@ U0 ScrnGet()
   }
   if (cnt)
     write(scrn_evt,&cnt,8);
+  if (tst_frame)
+    FrameWrite();
 }
 
 U0 PalSet(I64 i)
@@ -656,6 +706,10 @@ U0 IoOut(I64 port,U8 *data,I64 size)
   }
   v&=0xFF;
   switch (port) {
+    case 0xE9: //The debug port, the play check's output.
+      if (tst)
+	write(1,&v,1);
+      break;
     case 0x60: //The byte after 0xF3 is the repeat's rate and delay.
       if (kbd_cmd==0xF3)
 	kbd_type=v&0x7F;
@@ -894,14 +948,20 @@ U0 PcInit()
 }
 
 int main(int,char **argv)
-{
+{//HEMU, or HEMU -t DIR for the play check (TempleOS-Web's
+//Demo/Games/Test/Kvm.mjs): app id HEMUTEST, no sound, port 0xE9 to stdout.
   char path[4096],*regs,*blk;
   struct sockaddr_un addr;
   struct kvm_cpuid2 *id;
   pthread_t task;
   I64 i,n=0,size;
   args=argv;
-  if ((i=readlink("/proc/self/exe",path,sizeof(path)-1))>0) {
+  if (argv[1] && !strcmp(argv[1],"-t") && argv[2]) {//A play check's run: its
+//capture, a disk with the game on it and keys.fifo in DIR, from /.
+    if (chdir(tst=argv[2])<0 ||
+	  (tst_keys=open("keys.fifo",O_RDWR|O_NONBLOCK|O_CLOEXEC))<0)
+      Die(tst);
+  } else if ((i=readlink("/proc/self/exe",path,sizeof(path)-1))>0) {
     path[i]=0;
     *strrchr(path,'/')=0;
     chdir(path);
@@ -930,6 +990,7 @@ int main(int,char **argv)
   Wl(1,0,"u",wl_cb=wl_id++); //sync
   for (i=0;i<n;i++)
     pthread_create(&task,NULL,&CoreTask,(U0 *)i);
-  pthread_create(&task,NULL,&SndTask,NULL);
+  if (!tst)
+    pthread_create(&task,NULL,&SndTask,NULL);
   WinTask();
 }

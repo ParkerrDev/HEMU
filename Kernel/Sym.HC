@@ -277,7 +277,7 @@ U8 *task_members[TASK_MEMBERS_NUM]={"task_flags","next_task","pix_left",
 
 class CGuestAddr
 {//Addresses of the guest's globals HEMU reads and writes.
-  U64 ms_pos,ms_pos_text,ms_lb,ms_rb,ms_hard_installed,jiffies,
+  U64 ms_pos,ms_pos_text,ms_presnap,ms_lb,ms_rb,ms_hard_installed,jiffies,
 	winmgr_fps,winmgr_ideal_refresh_tS,winmgr_last_refresh_tS,
 	gr_dc2,gr_win_z_buf,sys_winmgr_task,seth_task;
 } guest;
@@ -323,6 +323,7 @@ Bool GuestNamesFind(U64 task)
     return FALSE;
   guest.ms_pos=GuestVarMember("ms","CMsStateGlbls","pos");
   guest.ms_pos_text=GuestVarMember("ms","CMsStateGlbls","pos_text");
+  guest.ms_presnap=GuestVarMember("ms","CMsStateGlbls","presnap");
   guest.ms_lb=GuestVarMember("ms","CMsStateGlbls","lb");
   guest.ms_rb=GuestVarMember("ms","CMsStateGlbls","rb");
   guest.ms_hard_installed=
@@ -337,7 +338,8 @@ Bool GuestNamesFind(U64 task)
   guest.gr_win_z_buf=GuestVarMember("gr","CGrGlbls","win_z_buf");
   guest.sys_winmgr_task=GuestVar("sys_winmgr_task");
   guest.seth_task=g_cpu_st[0].f_msr_gsbase+seth;
-  return guest.ms_pos && guest.ms_pos_text && guest.ms_lb && guest.ms_rb &&
+  return guest.ms_pos && guest.ms_pos_text && guest.ms_presnap &&
+	guest.ms_lb && guest.ms_rb &&
 	guest.ms_hard_installed && guest.jiffies && guest.winmgr_fps &&
 	guest.winmgr_ideal_refresh_tS && guest.winmgr_last_refresh_tS &&
 	guest.gr_dc2 && guest.sys_winmgr_task;

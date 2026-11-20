@@ -79,6 +79,12 @@ two, that line and `~/.local/share/applications/HEMU.desktop`.
   The browser runtime separately supports persistent C: storage in IndexedDB.
 - With `capture.txt`, `live.bin.gz` and `stock.disk` in place of the four-core files, the same program
   runs the one-core capture: it makes one processor for each block of the register dump.
+- `HEMU -t DIR` is TempleOS-Web's play check (`Demo/Games/Test/Kvm.mjs`): it runs the
+  `RAM.BIN`, `Regs.TXT` and `Disk.BIN` in DIR (a path from /), with app id HEMUTEST and no sound.
+  It types the lines of `DIR/keys.fifo`, an evdev key and 1 or 0 for down or up; a line `F` writes
+  the next finished frame to `DIR/frame.ppm`. It takes no keys or mouse from the compositor, so
+  focus moving between test windows cannot let go of a held Shift. Port 0xE9 goes to stdout, and a
+  reset ends it.
 - It is for x86-64 with KVM and Wayland only. Another CPU, macOS or a host without KVM uses the HolyC
   emulator in `Kernel/`.
 

@@ -18,14 +18,17 @@ U0 Present()
 
 U0 Frame()
 {
-  I64 mx=__host_msx,my=__host_msy,mb=__host_msb,sc,
+  I64 mx=__host_msx,my=__host_msy,mz=__host_wheel,mb=__host_msb,sc,
 	ns=__host_ns,budget=__host_budget;
   mx=ClampI64(mx,0,639);
   my=ClampI64(my,0,479);
-  if (g_names_ok) {//DrawMs uses pos; windows and menus use pos_text.
+  if (g_names_ok) {//WinQueIPMsgs detects mouse movement by comparing presnap.
     *(mem+guest.ms_pos+of_d3.x)(I64 *)=mx;
     *(mem+guest.ms_pos+of_d3.y)(I64 *)=my;
-    *(mem+guest.ms_pos+of_d3.z)(I64 *)=__host_wheel;
+    *(mem+guest.ms_pos+of_d3.z)(I64 *)=mz;
+    *(mem+guest.ms_presnap+of_d3.x)(I64 *)=mx;
+    *(mem+guest.ms_presnap+of_d3.y)(I64 *)=my;
+    *(mem+guest.ms_presnap+of_d3.z)(I64 *)=mz;
     *(mem+guest.ms_pos_text+of_d3.x)(I64 *)=mx/8;
     *(mem+guest.ms_pos_text+of_d3.y)(I64 *)=my/8;
     mem[guest.ms_lb]=mb&1;
