@@ -6,10 +6,15 @@
 #endif
 
 Bool g_names_ok;
-U64 g_inited,g_budget;
+U64 g_inited,g_budget,g_clock_line;
 
 U0 Present()
 {//Startup never exposes an incomplete draw buffer.
+  if (g_clock_line) {
+    if (!g_desk_ready || !mem[g_clock_line]) return;
+    g_clock_line=0;
+    g_present_seq=g_desk_seq; //The completed buffer can precede WallPaper.
+  }
   if (g_desk_ready && g_desk_seq!=g_present_seq) {
     __present(g_desk,640,480);
     g_present_seq=g_desk_seq;
@@ -69,7 +74,8 @@ U0 CaptureInit()
 U0 HemuInit()
 {
   F64 resume_tS;
-  I64 resume_ns,resume_ticks;
+  I64 resume_ns,resume_ticks,wall_line;
+  U64 wall;
   InitMem(RAM_SIZE+SCR_SIZE);
   __snap_load(mem);
   g_gc_sentinel=RAM_SIZE+SCR_SIZE-16;
@@ -86,6 +92,12 @@ U0 HemuInit()
     tsc=resume_ns;
     hpet_ctr=GuestU64(GuestVarMember("cnts","CCntsGlbls","HPET_initial"))+
 	  resume_ticks;
+    wall=GuestU64(GuestVar("wall"));
+    wall_line=GuestMember("CWallPaperGlbls","top_line");
+    if (wall && wall_line>=0 && wall+wall_line<RAM_SIZE) {
+      g_clock_line=wall+wall_line;
+      mem[g_clock_line]=0; //Wait for a fresh WallPaper clock before display.
+    }
     CaptureInit;
     RenderInit;
   } else

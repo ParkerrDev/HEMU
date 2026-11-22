@@ -34,7 +34,7 @@ import I64 __host_key();                              // next raw set-1 byte, <0
 import I64 __host_ns();                               //nanoseconds since the last frame
 import I64 __host_dt();                               // real milliseconds since the last frame (wall-clock pacing)
 import I64 __host_budget();                           // guest instructions to run this frame
-import I64 __host_time(I64 cmos_reg);                 // host wall clock for the CMOS RTC register the guest selected
+import I64 __host_time(I64 cmos_reg); //-1: packed local calendar.
 import U0 __host_snd(F64 hz,U64 ns); //Speaker frequency (0 off) and observed TSC nanoseconds.
 
 // ---- optional: native block JIT / per-core dispatch ------------------------------------------

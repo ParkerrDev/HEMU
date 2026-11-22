@@ -17,6 +17,7 @@ extern U0 KbdTick();
 #include "Time"
 #include "Kbd"
 
+U64 rtc_time;
 I64 rtc_idx,ms_byte0,ms_byte1,ms_byte2,ms_has,ms_phase,
       ps2q[16],ps2q_ms[16],ps2qh,ps2qt,ms_next,cfg_next,
       pit2_reload,pit2_div,pit2_wlo,spk_on,spk_ctrl;
@@ -76,7 +77,7 @@ U0 DevRst()
   pic1_base=pic1_irr=pic1_isr=pic1_initstep=0;
   pic2_base=pic2_irr=pic2_isr=pic2_initstep=0;
   pic1_mask=pic2_mask=0xFF;
-  irq_count=rtc_idx=0;
+  irq_count=rtc_idx=rtc_time=0;
   ms_byte0=ms_byte1=ms_byte2=ms_has=ms_phase=0;
   ps2qh=ps2qt=ms_next=cfg_next=0;
   pit2_reload=pit2_div=spk_on=spk_ctrl=0;
@@ -114,10 +115,19 @@ I64 PicNext()
 }
 
 U64 RtcRead(I64 idx)
-{//CMOS is binary, 24-hour time supplied by the host.
-  if (idx==0x0A) return 0;
-  if (idx==0x0B) return 0x06;
-  return __host_time(idx);
+{//Keep one local calendar sample in saved, shared device memory.
+  if (!idx || !rtc_time) rtc_time=__host_time(-1);
+  switch (idx) {
+    case 0: return rtc_time.u8[0];
+    case 2: return rtc_time.u8[1];
+    case 4: return rtc_time.u8[2];
+    case 6: return rtc_time.u8[3];
+    case 7: return rtc_time.u8[4];
+    case 8: return rtc_time.u8[5];
+    case 9: return rtc_time.u8[6];
+    case 0x0B: return 0x06;
+  }
+  return 0;
 }
 
 U64 IoIn(U64 port)
