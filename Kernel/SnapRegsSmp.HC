@@ -1,24 +1,24 @@
 //Stopped native registers SHA-256:
-//c30006f5969d88f6f4663fce38ed32e91accd9500fef362d8fa3dff62021c83a
+//08ebbc0af277475a4be31fa902901be83a80e2c2f5024c1c8ed1514f6959149c
 //Empty x87 slots have no live value; provenance retains their raw payloads.
 U0 SetSnapRegs()
 {
   g_ncore=4;
   g_cpu_st[0].f_reg[0]=0x15F8BA28;
-  g_cpu_st[0].f_reg[1]=0xFEE00300;
+  g_cpu_st[0].f_reg[1]=0x1006D8;
   g_cpu_st[0].f_reg[2]=0x0;
   g_cpu_st[0].f_reg[3]=0xAA8F;
   g_cpu_st[0].f_reg[4]=0x15F86C40;
-  g_cpu_st[0].f_reg[5]=0x10D18CC8;
+  g_cpu_st[0].f_reg[5]=0xFFBBE0;
   g_cpu_st[0].f_reg[6]=0x100300;
-  g_cpu_st[0].f_reg[7]=0x15F8C028;
-  g_cpu_st[0].f_reg[8]=0xBE40;
-  g_cpu_st[0].f_reg[9]=0x1FEE00300;
+  g_cpu_st[0].f_reg[7]=0x101188;
+  g_cpu_st[0].f_reg[8]=0x0;
+  g_cpu_st[0].f_reg[9]=0x100688;
   g_cpu_st[0].f_reg[10]=0x0;
   g_cpu_st[0].f_reg[11]=0x0;
   g_cpu_st[0].f_reg[12]=0x0;
-  g_cpu_st[0].f_reg[13]=0x1;
-  g_cpu_st[0].f_reg[14]=0xF3A;
+  g_cpu_st[0].f_reg[13]=0x0;
+  g_cpu_st[0].f_reg[14]=0x0;
   g_cpu_st[0].f_reg[15]=0x0;
   g_cpu_st[0].f_rip=0xCC3A;
   g_cpu_st[0].f_rfl=0x246;
@@ -26,7 +26,7 @@ U0 SetSnapRegs()
   g_cpu_st[0].f_msr_fsbase=0x15F8BA28;
   g_cpu_st[0].f_msr_gsbase=0x15F8C028;
   g_cpu_st[0].f_x87_cw=0x37F;
-  g_cpu_st[0].f_x87_sw=0x20;
+  g_cpu_st[0].f_x87_sw=0x30;
   g_cpu_st[0].f_fsp=0;
   g_cpu_st[0].f_fpr[0]=0.0;
   g_cpu_st[0].f_fpr[1]=0.0;

@@ -126,9 +126,9 @@ def Main(default_cores=1):
                 def Desktop():
                     path=work/"screen.ppm";qmp.command("screendump",{"filename":str(path)})
                     text=screen_text(path,font);(work/"screen.txt").write_text(text)
-                    return "Take Tour(y or n)?" in text and "Public Domain Operating System" in text and "<SHIFT-ESC> to exit." in text
+                    return "Take Tour(y or n)?" in text and "Tip of the Day" in text
                 # The question stays open: a visitor answers it, as on a fresh install.
-                Wait(Desktop,"native welcome card and tour question")
+                Wait(Desktop,"native desktop and tour question")
                 qmp.command("input-send-event",{"events":[
                     {"type":"rel","data":{"axis":"x","value":-1000}},
                     {"type":"rel","data":{"axis":"y","value":-1000}}]})

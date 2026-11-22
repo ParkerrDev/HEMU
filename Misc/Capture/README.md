@@ -1,7 +1,7 @@
 # Prepared native captures
 
 The stock desktop is prepared once in native TempleOS. Browser startup does
-not compile corrections or construct the Welcome window. Run the commands below
+not compile corrections or add startup windows. Run the commands below
 from the HEMU root with its pinned compiler at `holyc-wasm/`.
 
 ```sh
@@ -27,11 +27,9 @@ The .HC.Z files use TempleOS's CT_NONE container; the outer disk compression
 compresses their bytes. Native includes prefer .HC.Z, so an uncompressed
 sibling would not replace the original.
 
-Welcome.HC starts an independent native task after the normal HomeSys
-startup and raises it above AutoComplete once, using the native on-top group.
-It then returns to normal window priority so other apps can come forward.
-The original terminal still asks Take Tour(y or n)?. Capture waits
-until both the card and that question have been drawn, then stops all CPUs
+The original terminals and AutoComplete start normally. The first terminal
+still asks Take Tour(y or n)?. Capture waits until that question and the
+native tip of the day have been drawn, then stops all CPUs
 with empty x87 stacks and records RAM, disk and registers. The strict register
 parser also checks the supported CPU topology, flat long mode, interrupt
 shadow, MXCSR and shared system registers. Preparation inputs, installed
@@ -54,15 +52,6 @@ continues to describe the full RAM image before packing.
 This captures supported CPU state, not every QEMU device. HEMU initializes
 PIC, PIT and RTC under its startup policy. Full .hemu saved machines use their
 own CPU/device state and preserve their existing windows and code.
-
-Welcome.DAT is Terry Davis's public-domain sword-and-scales bitmap from
-Doc/Splash1.DAT in the 2014-07-15 archive:
-https://github.com/Francesco149/TempleOSGit/tree/a843cc86431af8ef59a396e50cb7c314f65a2430
-
-That archive labels its card V2.11; the graphic also appears in the supplied
-V2.17 video. Its 19,456 pixels and terminating zero are unchanged. Only the
-serialized header order changes from type,width,height,x,y to V5.03's
-type,x,y,width,height. Welcome displays the running OS version.
 
 Probe.py is the independent native XMM/x87 register-order witness. It boots
 the unprepared original disk and injects Test/Xmm.HC in a private copy.

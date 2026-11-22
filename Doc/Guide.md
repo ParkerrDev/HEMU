@@ -2,7 +2,7 @@
 
 HEMU resumes a captured, already booted TempleOS V5.03 desktop. The stock
 capture includes native document-clipping and autocomplete display corrections,
-a Welcome card and the OS's Take Tour question. It does not execute the DVD's
+and the OS's Take Tour question. It does not execute the DVD's
 16-bit BIOS loader or install from disk. Two backends run the capture:
 
 - `Linux/`: on x86-64 Linux, KVM runs TempleOS on the host processor. A C host
@@ -88,7 +88,7 @@ two, that line and `~/.local/share/applications/HEMU.desktop`.
 - It is for x86-64 with KVM and Wayland only. Another CPU, macOS or a host without KVM uses the HolyC
   emulator in `Kernel/`.
 
-Earlier measurements on an i9-14900HX under Hyprland, before the prepared Welcome
+Earlier measurements on an i9-14900HX under Hyprland, before the prepared desktop
 captures: the first frame was committed 7 to 10 ms after the program started; TempleOS's `CPURep` reports "004 Cores 2.418GHz"; `Demo/MultiCore/MPPrint` prints from all four
 cores; `Demo/Games/CastleFrankenstein` holds FPS:30 with one host core about 5 percent busy; `Snd(60)`
 and `Beep` come out at 437 and 491 Hz.
@@ -339,9 +339,9 @@ node holyc-wasm/Apps/HEMU/Misc/RegsMk.mjs capture-smp.txt
 
 `Misc/Pack.py` packages verified native captures with their base disk and
 generated sources under `Kernel/`. [Misc/Capture/README.md](../Misc/Capture/README.md)
-documents source preparation, native capture and the Welcome bitmap's historical
-provenance. The site reads the resulting files from its HEMU mount. Both stock
-captures already show the Welcome card and TempleOS's own "Take Tour(y or n)?"
+documents source preparation and native capture. The site reads the resulting
+files from its HEMU mount. Both stock captures already show TempleOS's own
+"Take Tour(y or n)?"
 question, ready for a visitor's answer. Display corrections are compiled before
 capture rather than installed while the browser loads.
 

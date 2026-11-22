@@ -1,5 +1,5 @@
 //Stopped native registers SHA-256:
-//dd03700ac460da7cdf19349d0ccf5e4603f722f077f43d6df18b6af87a22ae81
+//efed1b9376b931f6c116c98c466c269e25368ff485d428136460f876185dae8b
 //Empty x87 slots have no live value; provenance retains their raw payloads.
 U0 SetSnapRegs()
 {
@@ -18,7 +18,7 @@ U0 SetSnapRegs()
   g_cpu_st[0].f_reg[11]=0x0;
   g_cpu_st[0].f_reg[12]=0x0;
   g_cpu_st[0].f_reg[13]=0x1;
-  g_cpu_st[0].f_reg[14]=0x15C9;
+  g_cpu_st[0].f_reg[14]=0x1CED;
   g_cpu_st[0].f_reg[15]=0x0;
   g_cpu_st[0].f_rip=0xCC3A;
   g_cpu_st[0].f_rfl=0x246;
